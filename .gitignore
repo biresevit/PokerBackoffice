@@ -1,0 +1,10 @@
+.venv/
+.azure-venv/
+__pycache__/
+.pytest_cache/
+artifacts/
+api/local.settings.json
+.env
+*.zip
+.python_packages/
+

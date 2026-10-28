@@ -1,0 +1,8 @@
+azure-functions>=1.21,<2
+azure-storage-blob>=12.24,<13
+python-tds==1.17.1
+# python-tds 1.17.1 still uses X509 extension access removed in pyOpenSSL 26.2.
+pyOpenSSL>=26.1,<26.2
+certifi>=2025
+tzdata>=2025.2
+

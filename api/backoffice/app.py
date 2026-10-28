@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+from decimal import Decimal
+
+from .db import session
+from .histories import Histories
+from .store import Context, Store, memberships
+from .validation import Error, PROFILES, integer
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class Request:
+    method: str
+    path: str
+    headers: dict = field(default_factory=dict)
+    query: dict = field(default_factory=dict)
+    body: bytes = b""
+
+
+@dataclass
+class Response:
+    status: int
+    body: bytes
+    headers: dict
+
+
+def json_default(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(type(value).__name__)
+
+
+def response(body, status=200):
+    return Response(status, json.dumps(body, default=json_default, ensure_ascii=False).encode(),
+                    {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+def principal(headers):
+    # This entry point is deployed ONLY as a SWA managed API. The SWA edge owns
+    # this header; do not expose the function as a separate public HTTP service.
+    raw = headers.get("x-ms-client-principal", "")
+    try:
+        value = json.loads(base64.b64decode(raw, validate=True))
+        if (not isinstance(value, dict) or value.get("identityProvider") != "aad"
+            or not isinstance(value.get("userRoles"), list) or "authenticated" not in value.get("userRoles", [])
+            or not isinstance(value.get("userId"), str) or not 1 <= len(value["userId"]) <= 200):
+            raise ValueError()
+        return value
+    except (ValueError, TypeError, KeyError):
+        raise Error(401, "Sign in with Microsoft to continue")
+
+
+def handle(request: Request, session_factory=session, *, local_context: Context | None = None):
+    try:
+        # Public readiness probe exposes no identities or customer data.
+        if request.path == "/api/health" and request.method == "GET":
+            with session_factory() as db:
+                db.one("SELECT TOP(1) 1 AS ok FROM backoffice.Membership")
+            return response({"status": "ready"})
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        user = principal(headers) if local_context is None else {
+            "identityProvider": local_context.provider, "userId": local_context.subject, "userDetails": "Local preview"}
+        if len(request.body) > 2 * 1024 * 1024:
+            raise Error(413, "Request is too large")
+        body = {}
+        if request.method in ("POST", "PUT", "DELETE"):
+            if headers.get("x-requested-with") != "PokerBackoffice" or not headers.get("content-type", "").startswith("application/json"):
+                raise Error(403, "A same-origin JSON request is required")
+            try:
+                body = json.loads(request.body or b"{}")
+            except (ValueError, UnicodeError):
+                raise Error(400, "Invalid JSON")
+            if not isinstance(body, dict):
+                raise Error(400, "JSON body must be an object")
+        path = request.path.removeprefix("/api").strip("/")
+        with session_factory() as db:
+            member = memberships(db, user) if local_context is None else [
+                {"id": local_context.customer_id, "name": db.one("SELECT CustomerName FROM dbo.Customer WHERE CustomerId=%s", local_context.customer_id)["CustomerName"], "role": local_context.role}]
+            if path == "me" and request.method == "GET":
+                return response({"memberships": member, "user": {"name": user.get("userDetails", ""), "subject": user["userId"],
+                                 "provider": user["identityProvider"]}, "profiles": PROFILES, "local_preview": local_context is not None})
+            if path == "access-request" and request.method == "POST":
+                existing = db.one("SELECT Subject FROM backoffice.AccessRequest WITH(UPDLOCK,HOLDLOCK) WHERE Provider=%s AND Subject=%s", user["identityProvider"], user["userId"])
+                if not existing:
+                    db.execute("INSERT backoffice.AccessRequest(Provider,Subject,UserDetails) VALUES(%s,%s,%s)",
+                               user["identityProvider"], user["userId"], str(user.get("userDetails", ""))[:254])
+                return response({"requested": True})
+            cid = integer(request.query.get("customer_id", member[0]["id"] if member else 0), 0, field="customer")
+            membership = next((m for m in member if m["id"] == cid), None)
+            if not membership:
+                raise Error(403, "Your Microsoft account has not been granted access to this customer")
+            store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
+            if path == "sites" and request.method == "GET":
+                return response({"items": store.sites()})
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|histories|simulation)(?:/(.*))?", path)
+            if not match:
+                raise Error(404, "Endpoint not found")
+            sid, section, tail = int(match[1]), match[2], match[3]
+            # Scope checked before any resource-specific query (including downloads).
+            store.site(sid)
+            method = request.method
+            if section == "simulation" and method == "POST" and tail is None:
+                from decimal import Decimal
+                from schedule_controller.rules import Band
+                from schedule_controller.timeline import simulate
+                configuration = store.stakes(sid)
+                bands = [Band(r["tier"], Decimal(str(r["minimum"])), Decimal(str(r["maximum"])),
+                              round(float(r["percent"]) * 100), bool(r["upper_inclusive"])) for r in configuration["bands"]]
+                try:
+                    return response(simulate(body, bands, configuration["currency"]))
+                except (ValueError, TypeError, KeyError) as exc:
+                    raise Error(400, str(exc))
+            if section == "histories":
+                hh = Histories(store)
+                if method == "GET" and tail is None:
+                    return response(hh.list(sid, request.query))
+                if method == "GET" and tail and tail.isdecimal():
+                    return response(hh.detail(sid, int(tail)))
+                if method == "GET" and tail == "report":
+                    return response(hh.report(sid, request.query))
+                if method == "POST" and tail == "download":
+                    return Response(200, hh.download(sid, body.get("ids"), body.get("filters") if body.get("all") is True else None), {"Content-Type": "application/zip", "Cache-Control": "no-store",
+                        "Content-Disposition": 'attachment; filename="hand-histories.zip"', "X-Content-Type-Options": "nosniff"})
+            if section == "tables":
+                if method == "POST" and tail == "live":
+                    return response(store.request_live_view(sid,body.get("table_id"),body.get("account_id")))
+                if method == "GET" and tail and tail.startswith("live/"):
+                    return response(store.live_view(sid,tail.removeprefix("live/")))
+            if section == "metrics" and method == "GET" and tail is None:
+                return response(store.entry_metrics(sid,request.query))
+            if method == "GET" and tail is None and section in ("overview", "accounts", "schedule", "stakes", "tables", "machines"):
+                return response(getattr(store, section)(sid))
+            if section == "accounts":
+                if method == "POST" and tail in ("import-preview", "import"):
+                    return response(store.import_accounts(sid, body, apply=tail == "import"))
+                if tail and tail.isdecimal():
+                    if method == "PUT":
+                        return response(store.update_account(sid, int(tail), body))
+                    if method == "DELETE":
+                        return response(store.delete_account(sid, int(tail), body))
+            if method == "PUT" and tail is None and section in ("schedule", "stakes"):
+                return response(getattr(store, "save_" + section)(sid, body))
+            if method == "PUT" and section == "machines" and tail and tail.isdecimal():
+                return response(store.save_machine(sid, int(tail), body))
+            raise Error(405, "Method not allowed")
+    except Error as exc:
+        return response({"error": exc.message}, exc.status)
+    except Exception:
+        # Avoid returning SQL text, connection details, or storage credentials.
+        log.exception("Backoffice request failed")
+        return response({"error": "The request could not be completed. Please try again."}, 500)
