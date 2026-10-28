@@ -45,6 +45,10 @@ with sync_playwright() as p:
             page.get_by_role("button",name="+ Add window",exact=True).click()
             assert page.locator('#dialog [name="start"]').input_value()=="17:00"
             assert page.locator('#dialog [name="end"]').input_value()=="18:00"
+            assert page.locator('#dialog [name="weekdays"]').count()==7
+            assert page.locator('#dialog [name="weekdays"]:checked').count()==1
+            page.get_by_role("button",name="Every day",exact=True).click()
+            assert page.locator('#dialog [name="weekdays"]:checked').count()==7
             page.get_by_role("button",name="Done",exact=True).click()
         if name=="tasks":
             assert page.locator('[name="machine"]').count()==1
