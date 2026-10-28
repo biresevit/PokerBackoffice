@@ -344,6 +344,8 @@ class Store:
             latest.SampledUtc AS telemetry_at,latest.CpuPercent AS cpu_percent,
             latest.MemoryPercent AS memory_percent,latest.DiskPercent AS disk_percent,
             latest.DiskFreeBytes AS disk_free_bytes,latest.DiskTotalBytes AS disk_total_bytes,
+            latest.PokerControllerVersion AS poker_controller_version,
+            latest.PDecisionVersion AS pdecision_version,
             averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,
             averages.AvgDisk AS average_disk,
             (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
@@ -351,7 +353,8 @@ class Store:
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
             OUTER APPLY (SELECT TOP(1) t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.DiskPercent,
-                t.DiskFreeBytes,t.DiskTotalBytes FROM scheduler.MachineTelemetry t
+                t.DiskFreeBytes,t.DiskTotalBytes,t.PokerControllerVersion,t.PDecisionVersion
+                FROM scheduler.MachineTelemetry t
                 WHERE t.SiteId=a.SiteId AND t.MachineId=m.MachineId ORDER BY t.SampledUtc DESC) latest
             OUTER APPLY (SELECT AVG(CONVERT(float,t.CpuPercent)) AS AvgCpu,
                 AVG(CONVERT(float,t.MemoryPercent)) AS AvgMemory,AVG(CONVERT(float,t.DiskPercent)) AS AvgDisk
