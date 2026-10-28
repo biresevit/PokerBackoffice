@@ -49,6 +49,9 @@ with sync_playwright() as p:
             assert page.locator('#dialog [name="weekdays"]:checked').count()==1
             page.get_by_role("button",name="Every day",exact=True).click()
             assert page.locator('#dialog [name="weekdays"]:checked').count()==7
+            positions=page.evaluate("""() => {const box=n=>document.querySelector(`#dialog [name="${n}"]`).getBoundingClientRect();return {start:box('start'),end:box('end'),target:box('target')}}""")
+            assert abs(positions['start']['y']-positions['end']['y'])<2
+            assert positions['target']['y']>positions['start']['y']
             page.get_by_role("button",name="Done",exact=True).click()
         if name=="tasks":
             assert page.locator('[name="machine"]').count()==1
@@ -57,6 +60,7 @@ with sync_playwright() as p:
         if name=="sessions":
             assert page.locator('[name="from"]').input_value()!=""
             assert page.locator('[name="to"]').input_value()!=""
+            assert all(not value.startswith('-') for value in page.locator('#session-results tbody tr td:nth-child(4)').all_text_contents())
         if name=="histories":
             assert page.locator('[name="min_blind"]').input_value()!=""
             assert page.locator('[name="max_blind"]').input_value()!=""
