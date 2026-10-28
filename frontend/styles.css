@@ -16,7 +16,11 @@
 .lobby-table .top{gap:5px}.lobby-table .top span,.lobby-foot{font-size:9px}
 .lobby-table .pill{font-size:8px;padding:2px 5px}
 .lobby-seats{height:56px;margin:8px 0;border-width:3px}
-.lobby-seats i{width:11px;height:11px;border-width:1px}
+.lobby-seats{position:relative;display:block}
+.lobby-seats i{position:absolute;transform:translate(-50%,-50%);width:11px;height:11px;border-width:1px}
+.lobby-seats i.human{background:#f8fbf6;border:1px solid #fff;box-shadow:0 0 0 1px #aebcaf}
+.lobby-seats i.bot{background:#49a9df;border:1px solid #dff5ff;box-shadow:0 0 0 1px #176b99,0 0 5px #67c9ff99}
+.lobby-seats i.free{background:transparent;border:1px dashed #b9d1c488;box-shadow:none}
 .table-meta{display:flex;justify-content:space-between;gap:6px;font-size:10px}
 .lobby-foot{margin-top:7px;padding-top:7px;gap:5px}
 .lobby-foot .button{min-height:23px;padding:2px 6px;font-size:9px}

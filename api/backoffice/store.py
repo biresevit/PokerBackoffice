@@ -271,8 +271,7 @@ class Store:
         self.site(site_id)
         rows = self.db.rows("""SELECT t.TableId AS id,t.TableName AS name,t.GameType AS game,t.TableType AS table_type,t.BigBlind AS big_blind,
             t.CurrencyCode AS currency,t.MaxSeats AS seats,t.OccupiedSeats AS occupied,t.ObservedUtc AS observed,
-            t.FullSnapshotUtc AS snapshot,t.IsOpen AS is_open,
-            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SiteId=t.SiteId AND e.TableId=t.TableId AND e.IsOpen=1) AS bot_entries
+            t.FullSnapshotUtc AS snapshot,t.IsOpen AS is_open
             FROM scheduler.LobbyTable t
             WHERE t.SiteId=%s
               AND t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
@@ -283,6 +282,10 @@ class Store:
                 (SELECT TOP(1) e.MachineId FROM scheduler.Entry e WHERE e.SiteId=s.SiteId AND e.TableId=s.TableId
                  AND e.BotAccountId=s.BotAccountId AND e.IsOpen=1) AS machine_id
                 FROM scheduler.TableSeat s WHERE s.SiteId=%s AND s.TableId=%s ORDER BY s.SeatIndex""", site_id, row["id"])
+            # An open scheduler entry may still be joining, draining, or awaiting
+            # restart reconciliation. The lobby badge describes seats, so derive
+            # it only from bot identities present in this exact seat snapshot.
+            row["bot_entries"] = sum(1 for player in row["players"] if player["account_id"] is not None)
         # Active bot tables first, then populated tables, then empty inventory.
         rows.sort(key=live_table_sort_key)
         interval=self.db.one('SELECT LobbyRefreshSeconds AS seconds FROM scheduler.Site WHERE SiteId=%s',site_id)

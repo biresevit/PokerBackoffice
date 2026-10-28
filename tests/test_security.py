@@ -91,6 +91,35 @@ def test_live_tables_query_excludes_observations_older_than_60_seconds():
     assert "t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())" in db.lobby_sql
 
 
+def test_live_table_bot_count_comes_from_current_seats_not_open_entries():
+    class DB:
+        def one(self, sql, *params):
+            if "FROM scheduler.Site" in sql and "LobbyRefreshSeconds" not in sql:
+                return {"id":1,"name":"Evenbet","customer_id":14004,"timezone":"Europe/Budapest",
+                        "currency":"DEMO","version":1,"enabled":True}
+            if "LobbyRefreshSeconds" in sql:
+                return {"seconds":15}
+            raise AssertionError(sql)
+
+        def rows(self, sql, *params):
+            if "FROM scheduler.LobbyTable" in sql:
+                assert "scheduler.Entry" not in sql
+                return [{"id":"42","name":"Insurance","game":"NLH","table_type":"RING",
+                         "big_blind":2,"currency":"DEMO","seats":6,"occupied":2,
+                         "observed":datetime.now(timezone.utc),"snapshot":datetime.now(timezone.utc),
+                         "is_open":True}]
+            if "FROM scheduler.TableSeat" in sql:
+                return [{"seat":0,"username":"monica","stack":100,"bet":0,"in_game":False,
+                         "sitting_out":False,"account_id":7,"machine_id":1},
+                        {"seat":4,"username":"Human","stack":80,"bet":0,"in_game":False,
+                         "sitting_out":False,"account_id":None,"machine_id":None}]
+            raise AssertionError(sql)
+
+    result=Store(DB(),Context(14004,"test","subject","operator")).tables(1)
+    assert result["items"][0]["occupied"]==2
+    assert result["items"][0]["bot_entries"]==1
+
+
 def test_live_table_default_order_groups_ring_formats_before_tournaments():
     def row(game,table_type,bots=0,occupied=0):
         return {"game":game,"table_type":table_type,"bot_entries":bots,"occupied":occupied,
