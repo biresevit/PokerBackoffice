@@ -32,6 +32,9 @@ def test_all_read_pages_and_foreign_scope(store):
     assert isinstance(store.sessions(1,{}),dict)
     metrics=store.entry_metrics(1,{"from":"2026-10-28","to":"2026-10-28"})
     assert metrics["timezone"]=="Europe/Budapest" and metrics["points"]
+    machine=store.machines(1)["items"][0]
+    resources=store.machine_metrics(1,machine["id"],{"hours":"24"})
+    assert resources["hours"]==24 and isinstance(resources["points"],list)
     with pytest.raises(Error) as e:
         Store(store.db,Context(1,"test","other","operator")).accounts(1)
     assert e.value.status==404

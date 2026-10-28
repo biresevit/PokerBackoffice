@@ -373,6 +373,22 @@ class Store:
             row["warnings"]=warnings
         return {"items": rows, "sites": self.sites()}
 
+    def machine_metrics(self, site_id, machine_id, query):
+        self.site(site_id)
+        machine = self.db.one("""SELECT ma.MachineId FROM scheduler.MachineAssignment ma
+            JOIN dbo.CustomerMachine cm ON cm.MachineId=ma.MachineId
+            WHERE ma.SiteId=%s AND ma.MachineId=%s AND cm.CustomerId=%s AND cm.IsActive=1""",
+            site_id, machine_id, self.ctx.customer_id)
+        if not machine:
+            raise Error(404, "Machine not found")
+        hours = integer(query.get("hours", 24), 1, 168, "hours")
+        points = self.db.rows("""SELECT SampledUtc AS at,CpuPercent AS cpu,MemoryPercent AS memory,
+            DiskPercent AS disk,ActiveEntries AS entries
+            FROM scheduler.MachineTelemetry
+            WHERE SiteId=%s AND MachineId=%s AND SampledUtc>=DATEADD(hour,%s,SYSUTCDATETIME())
+            ORDER BY SampledUtc""", site_id, machine_id, -hours)
+        return {"machine_id": machine_id, "hours": hours, "sample_minutes": 5, "points": points}
+
     def tasks(self,site_id,query):
         self.site(site_id)
         machine=str(query.get("machine") or "").strip()[:100]

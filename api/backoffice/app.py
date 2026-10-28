@@ -145,6 +145,10 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 return response(store.entry_metrics(sid,request.query))
             if section in ("tasks","sessions") and method == "GET" and tail is None:
                 return response(getattr(store,section)(sid,request.query))
+            if section == "machines" and method == "GET" and tail:
+                metric_match = re.fullmatch(r"(\d+)/metrics", tail)
+                if metric_match:
+                    return response(store.machine_metrics(sid, int(metric_match[1]), request.query))
             if method == "GET" and tail is None and section in ("overview", "accounts", "schedule", "stakes", "tables", "machines"):
                 return response(getattr(store, section)(sid))
             if section == "accounts":
