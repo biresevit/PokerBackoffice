@@ -25,9 +25,9 @@ with sync_playwright() as p:
       return colors;
     }""")
     assert board_colors==['rgb(201, 28, 39)','rgb(32, 37, 34)'],board_colors
-    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tables","Live tables"),("histories","Hand histories"),("simulation","Schedule simulator")]:
+    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tasks","Tasks"),("sessions","Sessions"),("tables","Live tables"),("histories","Hand histories"),("simulation","Schedule simulator")]:
         page.goto("http://127.0.0.1:4280/#"+name)
-        page.get_by_role("heading",name=title,exact=True).wait_for()
+        page.get_by_role("heading",name=title,exact=True,level=1).wait_for()
         page.wait_for_timeout(500)
         assert not page.locator(".notice.error").count(),page.locator(".notice.error").all_text_contents()
         if name=="accounts":
@@ -40,6 +40,19 @@ with sync_playwright() as p:
             page.get_by_role("button",name="Preview changes").click()
             page.locator('#csv-preview').get_by_role('cell',name='unchanged',exact=True).wait_for()
             page.get_by_role("button",name="Cancel",exact=True).click()
+        if name=="schedule":
+            assert page.get_by_role("button",name="Save schedule",exact=True).count()==0
+            page.get_by_role("button",name="+ Add window",exact=True).click()
+            assert page.locator('#dialog [name="start"]').input_value()=="17:00"
+            assert page.locator('#dialog [name="end"]').input_value()=="18:00"
+            page.get_by_role("button",name="Done",exact=True).click()
+        if name=="tasks":
+            assert page.locator('[name="machine"]').count()==1
+            assert page.locator('[name="bot"]').count()==1
+            assert page.locator('[name="kind"] option').all_text_contents()==['All task types','Join table','Leave table','Scan lobby']
+        if name=="sessions":
+            assert page.locator('[name="from"]').input_value()!=""
+            assert page.locator('[name="to"]').input_value()!=""
         if name=="histories":
             assert page.locator('[name="min_blind"]').input_value()!=""
             assert page.locator('[name="max_blind"]').input_value()!=""

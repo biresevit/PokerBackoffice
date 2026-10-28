@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from uuid import UUID
 
 from .db import session
 from .histories import Histories
@@ -39,6 +40,8 @@ def json_default(value):
         return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     raise TypeError(type(value).__name__)
 
 
@@ -104,7 +107,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|histories|simulation)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
@@ -140,6 +143,8 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                     return response(store.live_view(sid,tail.removeprefix("live/")))
             if section == "metrics" and method == "GET" and tail is None:
                 return response(store.entry_metrics(sid,request.query))
+            if section in ("tasks","sessions") and method == "GET" and tail is None:
+                return response(getattr(store,section)(sid,request.query))
             if method == "GET" and tail is None and section in ("overview", "accounts", "schedule", "stakes", "tables", "machines"):
                 return response(getattr(store, section)(sid))
             if section == "accounts":

@@ -28,6 +28,8 @@ def store():
 def test_all_read_pages_and_foreign_scope(store):
     for name in ("overview","accounts","schedule","stakes","tables","machines"):
         assert isinstance(getattr(store,name)(1),dict)
+    assert isinstance(store.tasks(1,{}),dict)
+    assert isinstance(store.sessions(1,{}),dict)
     metrics=store.entry_metrics(1,{"from":"2026-10-28","to":"2026-10-28"})
     assert metrics["timezone"]=="Europe/Budapest" and metrics["points"]
     with pytest.raises(Error) as e:

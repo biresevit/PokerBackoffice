@@ -53,6 +53,7 @@ def main():
             "backoffice.MachineMetadata":"SELECT,UPDATE","backoffice.MachineAllowedSite":"SELECT,INSERT,DELETE",
             "scheduler.Site":"SELECT,UPDATE","scheduler.AccountPolicy":"SELECT,INSERT,UPDATE",
             "scheduler.AccountDay":"SELECT","scheduler.Entry":"SELECT","scheduler.AccountLease":"SELECT",
+            "scheduler.AccountSession":"SELECT","scheduler.Command":"SELECT","scheduler.MachineTelemetry":"SELECT",
             "scheduler.ScheduleWindow":"SELECT","scheduler.StakeBand":"SELECT,UPDATE",
             "scheduler.LobbyTable":"SELECT","scheduler.TableSeat":"SELECT","scheduler.MachineAssignment":"SELECT,UPDATE",
             "scheduler.LiveViewRequest":"SELECT,INSERT,UPDATE","scheduler.LiveTableSnapshot":"SELECT"}

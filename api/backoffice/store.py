@@ -341,14 +341,103 @@ class Store:
             m.Casino AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
             a.MaxEntries AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
             a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,
+            latest.SampledUtc AS telemetry_at,latest.CpuPercent AS cpu_percent,
+            latest.MemoryPercent AS memory_percent,latest.DiskPercent AS disk_percent,
+            latest.DiskFreeBytes AS disk_free_bytes,latest.DiskTotalBytes AS disk_total_bytes,
+            averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,
+            averages.AvgDisk AS average_disk,
             (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1) AS entries
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+            OUTER APPLY (SELECT TOP(1) t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.DiskPercent,
+                t.DiskFreeBytes,t.DiskTotalBytes FROM scheduler.MachineTelemetry t
+                WHERE t.SiteId=a.SiteId AND t.MachineId=m.MachineId ORDER BY t.SampledUtc DESC) latest
+            OUTER APPLY (SELECT AVG(CONVERT(float,t.CpuPercent)) AS AvgCpu,
+                AVG(CONVERT(float,t.MemoryPercent)) AS AvgMemory,AVG(CONVERT(float,t.DiskPercent)) AS AvgDisk
+                FROM scheduler.MachineTelemetry t WHERE t.SiteId=a.SiteId AND t.MachineId=m.MachineId
+                AND t.SampledUtc>=DATEADD(minute,-15,SYSUTCDATETIME())) averages
             WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""", self.ctx.customer_id)
         for row in rows:
             row["allowed_sites"] = [r["SiteId"] for r in self.db.rows("SELECT SiteId FROM backoffice.MachineAllowedSite WHERE MachineId=%s", row["id"])]
+            heartbeat=row.get("heartbeat")
+            row["online"] = bool(row.get("ready") and heartbeat and
+                heartbeat >= datetime.now(timezone.utc).replace(tzinfo=None)-timedelta(seconds=180))
+            warnings=[]
+            if row.get("average_cpu") is not None and row["average_cpu"]>=90: warnings.append("CPU has averaged at least 90% for 15 minutes")
+            if row.get("average_memory") is not None and row["average_memory"]>=90: warnings.append("Memory usage has averaged at least 90% for 15 minutes")
+            if row.get("average_disk") is not None and row["average_disk"]>=90: warnings.append("Disk has less than 10% free space")
+            row["warnings"]=warnings
         return {"items": rows, "sites": self.sites()}
+
+    def tasks(self,site_id,query):
+        self.site(site_id)
+        machine=str(query.get("machine") or "").strip()[:100]
+        bot=str(query.get("bot") or "").strip()[:100]
+        kind=str(query.get("kind") or "all").lower()
+        if kind not in ("all","join","leave","scan"):
+            raise Error(400,"Invalid task type")
+        page=integer(query.get("page",1),1,100000,"page")
+        size=integer(query.get("page_size",50),10,100,"page size")
+        if size not in (10,20,50,100): raise Error(400,"Page size must be 10, 20, 50 or 100")
+        pattern=lambda value: "%"+value+"%"
+        where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR
+            COALESCE(x.HostName,m.Description,'') LIKE %s) AND (%s='' OR b.Username LIKE %s)
+            AND (%s='all' OR c.Kind=%s)"""
+        args=(site_id,machine,machine,pattern(machine),bot,pattern(bot),kind,kind)
+        total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.Command c
+            JOIN scheduler.Entry e ON e.EntryId=c.EntryId JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+            JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
+            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId WHERE {where}""",*args)["n"]
+        items=self.db.rows(f"""SELECT c.CommandId AS id,c.Kind AS kind,c.Status AS status,
+            c.CreatedUtc AS created,c.UpdatedUtc AS updated,c.NotBeforeUtc AS due,c.AttemptCount AS attempts,
+            c.ResultCode AS result_code,c.ResultText AS result_text,e.TableId AS table_id,
+            b.Username AS bot,c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
+            FROM scheduler.Command c JOIN scheduler.Entry e ON e.EntryId=c.EntryId
+            JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+            JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
+            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
+            WHERE {where} ORDER BY c.CreatedUtc DESC,c.CommandId
+            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY""",*args,(page-1)*size,size)
+        choices=self.db.rows("""SELECT DISTINCT c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
+            FROM scheduler.Command c JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
+            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
+            WHERE c.SiteId=%s ORDER BY machine""",site_id)
+        bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
+            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s ORDER BY b.Username""",site_id)
+        return {"items":items,"total":total,"page":page,"page_size":size,"machines":choices,"bots":bots}
+
+    def sessions(self,site_id,query):
+        site=self.site(site_id)
+        zone=ZoneInfo(site["timezone"]);today=datetime.now(timezone.utc).astimezone(zone).date()
+        try:
+            from_day=datetime.strptime(query.get("from") or (today-timedelta(days=7)).isoformat(),"%Y-%m-%d").date()
+            to_day=datetime.strptime(query.get("to") or today.isoformat(),"%Y-%m-%d").date()
+        except ValueError: raise Error(400,"From and To must be valid dates")
+        if to_day<from_day or (to_day-from_day).days>366: raise Error(400,"Session date range must be between 1 and 367 days")
+        start=datetime.combine(from_day,datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        stop=datetime.combine(to_day+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        bot=str(query.get("bot") or "").strip()[:100]
+        page=integer(query.get("page",1),1,100000,"page");size=integer(query.get("page_size",50),10,100,"page size")
+        if size not in (10,20,50,100): raise Error(400,"Page size must be 10, 20, 50 or 100")
+        where="s.SiteId=%s AND s.StartedUtc<%s AND COALESCE(s.ActualEndUtc,SYSUTCDATETIME())>=%s AND (%s='' OR b.Username LIKE %s)"
+        args=(site_id,stop,start,bot,"%"+bot+"%")
+        total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.AccountSession s
+            JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId WHERE {where}""",*args)["n"]
+        items=self.db.rows(f"""SELECT s.SessionId AS id,b.Username AS bot,s.MachineId AS machine_id,
+            COALESCE(x.HostName,m.Description) AS machine,s.StartedUtc AS started,s.PlannedEndUtc AS planned_end,
+            s.ActualEndUtc AS actual_end,s.IsOpen AS is_open,s.EndReason AS end_reason,
+            DATEDIFF(second,s.StartedUtc,COALESCE(s.ActualEndUtc,SYSUTCDATETIME())) AS duration_seconds,
+            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SessionId=s.SessionId) AS entries
+            FROM scheduler.AccountSession s JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId
+            JOIN dbo.CustomerMachine m ON m.MachineId=s.MachineId
+            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
+            WHERE {where} ORDER BY s.StartedUtc DESC,s.SessionId
+            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY""",*args,(page-1)*size,size)
+        bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
+            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s ORDER BY b.Username""",site_id)
+        return {"items":items,"total":total,"page":page,"page_size":size,"bots":bots,
+                "from":from_day.isoformat(),"to":to_day.isoformat()}
 
     def save_machine(self, site_id, machine_id, body):
         self.site(site_id)
@@ -384,13 +473,22 @@ class Store:
         accounts = self.accounts(site_id)["items"]
         machines = self.machines(site_id)["items"]
         entries = self.db.rows("SELECT Status AS status,COUNT(*) AS count FROM scheduler.Entry WHERE SiteId=%s AND IsOpen=1 GROUP BY Status", site_id)
-        history = self.db.one("SELECT COUNT(*) AS count,MAX(UploadedUtc) AS latest FROM dbo.CustomerHandHistory WHERE CustomerId=%s AND LEFT(BlobPath,LEN(%s))=%s",
-                              self.ctx.customer_id, f"{self.ctx.customer_id}/{site['name']}/", f"{self.ctx.customer_id}/{site['name']}/")
-        activity = self.db.rows("SELECT TOP(8) Action AS action,Entity AS entity,CreatedUtc AS at FROM backoffice.AuditLog WHERE CustomerId=%s ORDER BY Id DESC", self.ctx.customer_id)
+        zone=ZoneInfo(site["timezone"]);local_now=datetime.now(timezone.utc).astimezone(zone)
+        today=datetime.combine(local_now.date(),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        month=datetime.combine(local_now.date()-timedelta(days=29),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        prefix=f"{self.ctx.customer_id}/{site['name']}/"
+        history = self.db.one("""SELECT SUM(CASE WHEN UploadedUtc>=%s THEN 1 ELSE 0 END) AS today,
+            SUM(CASE WHEN UploadedUtc>=%s THEN 1 ELSE 0 END) AS last_30_days,MAX(UploadedUtc) AS latest
+            FROM dbo.CustomerHandHistory WHERE CustomerId=%s AND LEFT(BlobPath,LEN(%s))=%s""",
+            today,month,self.ctx.customer_id,prefix,prefix)
         schedule = self.schedule(site_id)
+        online=sum(1 for machine in machines if machine["online"])
+        warnings=[{"machine":m["name"] or f"Machine {m['id']}","message":warning}
+                  for m in machines for warning in m["warnings"]]
         return {"site": site, "accounts": len(accounts), "synthetic_accounts": sum(bool(a["synthetic"]) for a in accounts),
                 "entries": entries, "scheduled_target": scheduled_target(schedule), "machines": machines,
-                "hand_histories": history, "schedule": schedule, "activity": activity}
+                "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings},
+                "hand_histories": history, "schedule": schedule}
 
     def entry_metrics(self, site_id, query):
         """Scheduled target and confirmed running entries over a bounded date range."""
