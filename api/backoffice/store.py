@@ -22,6 +22,52 @@ def scheduled_target(schedule, instant=None):
                  and row["start_minute"] <= minute < row["end_minute"]), 0)
 
 
+def entry_history_points(schedule, intervals, start, stop, step_minutes):
+    """Keep exact entry transitions and schedule changes alongside regular ticks."""
+    stamps={start,stop}
+    cursor=start
+    while cursor<stop:
+        stamps.add(cursor)
+        cursor+=timedelta(minutes=step_minutes)
+    previous=scheduled_target(schedule,start)
+    cursor=start.replace(second=0,microsecond=0)+timedelta(minutes=1)
+    while cursor<=stop:
+        target=scheduled_target(schedule,cursor)
+        if target!=previous:
+            stamps.add(cursor)
+        previous=target
+        cursor+=timedelta(minutes=1)
+    events={}
+    running=sum(seated<=start and (closed is None or closed>start) for seated,closed in intervals)
+    for seated,closed in intervals:
+        for stamp,delta in ((seated,1),(closed,-1)):
+            if stamp is not None and start<stamp<=stop:
+                stamps.add(stamp)
+                events[stamp]=events.get(stamp,0)+delta
+    points=[]
+    for stamp in sorted(stamps):
+        running+=events.get(stamp,0)
+        points.append({"at":stamp,"scheduled":scheduled_target(schedule,stamp),"running":running})
+    return points
+
+
+def task_result_description(row):
+    code=row.get("result_code")
+    descriptions={
+        "target_reduced":"Join cancelled because the scheduled entry target was reduced; this table entry was no longer needed.",
+        "ValueError":"The task failed validation. The original worker did not record the specific reason.",
+        "TimeoutError":"The task timed out while waiting for a response or confirmation.",
+        "ConnectionError":"The task could not complete because the connection failed.",
+        "ProtocolError":"The task failed while communicating with the poker site. No detailed reason was recorded.",
+        "RuntimeError":"The worker could not complete the task. No detailed reason was recorded.",
+        "machine_offline":"Task expired because the machine stopped sending heartbeats for more than three minutes.",
+        "worker_restarted":"Task cancelled because the machine worker restarted; its previous commands cannot be replayed.",
+        "cleanup_unconfirmed":"The task failed and the worker could not confirm that the table was left. Reconciliation is required.",
+        "reconciled_absent":"The worker confirmed that the bot is no longer seated at this table.",
+    }
+    return row.get("result_text") or descriptions.get(code) or (str(code).replace("_"," ").capitalize() if code else "")
+
+
 def live_table_sort_key(row):
     """Ring formats first; tournaments follow, retaining occupancy priority per group."""
     table_type = str(row.get("table_type") or "RING").upper()
@@ -53,6 +99,7 @@ def memberships(db, principal):
 class Store:
     def __init__(self, db, context: Context):
         self.db, self.ctx = db, context
+        self._offline_expired = False
 
     def sites(self):
         return self.db.rows("""SELECT SiteId AS id,Casino AS name,Platform AS platform,TimeZone AS timezone,
@@ -71,6 +118,9 @@ class Store:
                 raise Error(403, "Your account has view-only access")
             if integer(version, 1, 2**63 - 1, "configuration version") != result["version"]:
                 raise Error(409, "Settings changed since this page was loaded. Refresh and try again.")
+        if not self._offline_expired:
+            self.db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=%s", self.ctx.customer_id)
+            self._offline_expired = True
         return result
 
     def bump(self, site_id):
@@ -349,7 +399,11 @@ class Store:
             averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,
             averages.AvgDisk AS average_disk,
             (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
-             WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1) AS entries
+             WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
+               AND e.Status IN ('seated','sitting_out','draining')) AS entries,
+            (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
+             WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
+               AND e.Status IN ('reserved','joining','uncertain')) AS pending_entries
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
             OUTER APPLY (SELECT TOP(1) t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.DiskPercent,
@@ -382,11 +436,15 @@ class Store:
         if not machine:
             raise Error(404, "Machine not found")
         hours = integer(query.get("hours", 24), 1, 168, "hours")
-        points = self.db.rows("""SELECT SampledUtc AS at,CpuPercent AS cpu,MemoryPercent AS memory,
-            DiskPercent AS disk,ActiveEntries AS entries
-            FROM scheduler.MachineTelemetry
-            WHERE SiteId=%s AND MachineId=%s AND SampledUtc>=DATEADD(hour,%s,SYSUTCDATETIME())
-            ORDER BY SampledUtc""", site_id, machine_id, -hours)
+        points = self.db.rows("""SELECT t.SampledUtc AS at,t.CpuPercent AS cpu,t.MemoryPercent AS memory,
+            t.DiskPercent AS disk,
+                (SELECT COUNT(*) FROM scheduler.Entry e
+                 WHERE e.SiteId=t.SiteId AND e.MachineId=t.MachineId
+                   AND e.SeatedUtc<=t.SampledUtc
+                   AND (e.ClosedUtc IS NULL OR e.ClosedUtc>t.SampledUtc)) AS entries
+            FROM scheduler.MachineTelemetry t
+            WHERE t.SiteId=%s AND t.MachineId=%s AND t.SampledUtc>=DATEADD(hour,%s,SYSUTCDATETIME())
+            ORDER BY t.SampledUtc""", site_id, machine_id, -hours)
         return {"machine_id": machine_id, "hours": hours, "sample_minutes": 5, "points": points}
 
     def tasks(self,site_id,query):
@@ -396,14 +454,17 @@ class Store:
         kind=str(query.get("kind") or "all").lower()
         if kind not in ("all","join","leave","scan"):
             raise Error(400,"Invalid task type")
+        status=str(query.get("status") or "all").lower()
+        if status not in ("all","pending","claimed","succeeded","failed","cancelled","expired","uncertain"):
+            raise Error(400,"Invalid task status")
         page=integer(query.get("page",1),1,100000,"page")
         size=integer(query.get("page_size",50),10,100,"page size")
         if size not in (10,20,50,100): raise Error(400,"Page size must be 10, 20, 50 or 100")
         pattern=lambda value: "%"+value+"%"
         where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR
             COALESCE(x.HostName,m.Description,'') LIKE %s) AND (%s='' OR b.Username LIKE %s)
-            AND (%s='all' OR c.Kind=%s)"""
-        args=(site_id,machine,machine,pattern(machine),bot,pattern(bot),kind,kind)
+            AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)"""
+        args=(site_id,machine,machine,pattern(machine),bot,pattern(bot),kind,kind,status,status)
         total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.Command c
             JOIN scheduler.Entry e ON e.EntryId=c.EntryId JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
             JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
@@ -423,7 +484,9 @@ class Store:
             LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             WHERE c.SiteId=%s ORDER BY machine""",site_id)
         bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
-            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s ORDER BY b.Username""",site_id)
+            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""",site_id)
+        for item in items:
+            item["result_description"]=task_result_description(item)
         return {"items":items,"total":total,"page":page,"page_size":size,"machines":choices,"bots":bots}
 
     def sessions(self,site_id,query):
@@ -437,10 +500,18 @@ class Store:
         start=datetime.combine(from_day,datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
         stop=datetime.combine(to_day+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
         bot=str(query.get("bot") or "").strip()[:100]
+        result=str(query.get("result") or "all").strip()
+        if len(result)>80:
+            raise Error(400,"Invalid session result")
+        result_options=[r["reason"] for r in self.db.rows("SELECT DISTINCT EndReason AS reason FROM scheduler.AccountSession WHERE SiteId=%s AND IsOpen=0 AND EndReason IS NOT NULL ORDER BY EndReason",site_id)]
+        if result not in ("all","active","scheduled","closed",*result_options):
+            raise Error(400,"Invalid session result")
         page=integer(query.get("page",1),1,100000,"page");size=integer(query.get("page_size",50),10,100,"page size")
         if size not in (10,20,50,100): raise Error(400,"Page size must be 10, 20, 50 or 100")
-        where="s.SiteId=%s AND s.StartedUtc<%s AND COALESCE(s.ActualEndUtc,SYSUTCDATETIME())>=%s AND (%s='' OR b.Username LIKE %s)"
-        args=(site_id,stop,start,bot,"%"+bot+"%")
+        where="""s.SiteId=%s AND s.StartedUtc<%s AND COALESCE(s.ActualEndUtc,SYSUTCDATETIME())>=%s AND (%s='' OR b.Username LIKE %s) AND (%s='all' OR (%s='closed' AND s.IsOpen=0) OR
+            CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN 'scheduled'
+                 WHEN s.IsOpen=1 THEN 'active' ELSE COALESCE(s.EndReason,'closed') END=%s)"""
+        args=(site_id,stop,start,bot,"%"+bot+"%",result,result,result)
         total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.AccountSession s
             JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId WHERE {where}""",*args)["n"]
         items=self.db.rows(f"""SELECT s.SessionId AS id,b.Username AS bot,s.MachineId AS machine_id,
@@ -456,9 +527,9 @@ class Store:
             WHERE {where} ORDER BY s.StartedUtc DESC,s.SessionId
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY""",*args,(page-1)*size,size)
         bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
-            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s ORDER BY b.Username""",site_id)
+            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""",site_id)
         return {"items":items,"total":total,"page":page,"page_size":size,"bots":bots,
-                "from":from_day.isoformat(),"to":to_day.isoformat()}
+                "result_options":result_options,"from":from_day.isoformat(),"to":to_day.isoformat()}
 
     def save_machine(self, site_id, machine_id, body):
         self.site(site_id)
@@ -532,7 +603,7 @@ class Store:
         stop = min(requested_stop, datetime.now(timezone.utc))
         if stop <= start:
             raise Error(400, "The selected range has not started yet")
-        step_minutes = 5 if days <= 2 else 30 if days <= 14 else 120
+        step_minutes = 1 if days <= 2 else 30 if days <= 14 else 120
         rows = self.db.rows("""SELECT SeatedUtc AS seated,ClosedUtc AS closed
             FROM scheduler.Entry WHERE SiteId=%s AND SeatedUtc IS NOT NULL
               AND SeatedUtc<%s AND (ClosedUtc IS NULL OR ClosedUtc>%s)""",
@@ -541,17 +612,6 @@ class Store:
             row["seated"].replace(tzinfo=timezone.utc),
             row["closed"].replace(tzinfo=timezone.utc) if row["closed"] else None
         ) for row in rows]
-        points = []
-        stamp = start
-        step = timedelta(minutes=step_minutes)
-        while stamp < stop:
-            points.append({"at": stamp, "scheduled": scheduled_target(schedule, stamp),
-                           "running": sum(seated <= stamp and (closed is None or stamp < closed)
-                                          for seated, closed in intervals)})
-            stamp += step
-        if not points or points[-1]["at"] < stop:
-            points.append({"at": stop, "scheduled": scheduled_target(schedule, stop),
-                           "running": sum(seated <= stop and (closed is None or stop < closed)
-                                          for seated, closed in intervals)})
+        points = entry_history_points(schedule, intervals, start, stop, step_minutes)
         return {"from": from_day.isoformat(), "to": to_day.isoformat(), "timezone": site["timezone"],
                 "step_minutes": step_minutes, "points": points}

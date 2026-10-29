@@ -70,6 +70,10 @@ def test_current_scheduled_target_uses_local_weekday_and_minute():
 
 def test_live_tables_query_excludes_observations_older_than_60_seconds():
     class DB:
+        def execute(self, sql, *params):
+            assert sql == "EXEC scheduler.ExpireOfflineMachines @CustomerId=%s"
+            assert params == (14004,)
+
         lobby_sql = None
 
         def one(self, sql, *params):
@@ -93,6 +97,9 @@ def test_live_tables_query_excludes_observations_older_than_60_seconds():
 
 def test_live_table_bot_count_comes_from_current_seats_not_open_entries():
     class DB:
+        def execute(self, sql, *params):
+            assert params == (14004,)
+
         def one(self, sql, *params):
             if "FROM scheduler.Site" in sql and "LobbyRefreshSeconds" not in sql:
                 return {"id":1,"name":"Evenbet","customer_id":14004,"timezone":"Europe/Budapest",
@@ -131,3 +138,54 @@ def test_live_table_default_order_groups_ring_formats_before_tournaments():
         ("NLH","RING"),("NLH","RING"),("PLO4","RING"),("PLO5","RING"),
         ("NLH","SNG"),("NLH","MTT")]
     assert ordered[0]["bot_entries"]==2
+
+
+def test_offline_expiration_runs_once_after_customer_authorization():
+    class DB:
+        calls = []
+        def one(self, sql, *params):
+            return {"version":1} if params == (1,14004) else None
+        def execute(self, sql, *params):
+            self.calls.append((sql,params))
+    db=DB()
+    store=Store(db,Context(14004,"test","subject","viewer"))
+    store.site(1)
+    store.site(1)
+    assert db.calls == [("EXEC scheduler.ExpireOfflineMachines @CustomerId=%s",(14004,))]
+    db.calls.clear()
+    with pytest.raises(Error):
+        Store(db,Context(1,"test","foreign","viewer")).site(1)
+    assert db.calls == []
+
+
+def test_task_result_descriptions_explain_cancellations_and_missing_details():
+    from backoffice.store import task_result_description
+    assert "target was reduced" in task_result_description({"result_code":"target_reduced"})
+    assert "did not record" in task_result_description({"result_code":"ValueError"})
+    assert task_result_description({"result_code":"ValueError","result_text":"Insufficient balance"})=="Insufficient balance"
+
+
+def test_entry_chart_preserves_exact_changes_and_schedule_boundaries():
+    from datetime import timedelta
+    from backoffice.store import entry_history_points
+    start=datetime(2026,10,29,8,tzinfo=timezone.utc)
+    schedule={"enabled":True,"timezone":"UTC","windows":[{"weekday":3,"start_minute":480,"end_minute":482,"target":10},{"weekday":3,"start_minute":482,"end_minute":540,"target":20}]}
+    join=start+timedelta(seconds=37)
+    close=start+timedelta(minutes=3,seconds=12)
+    points=entry_history_points(schedule,[(join,close)],start,start+timedelta(minutes=5),5)
+    by_time={p["at"]:p for p in points}
+    assert by_time[start]["running"]==0
+    assert by_time[join]["running"]==1
+    assert by_time[start+timedelta(minutes=2)]["scheduled"]==20
+    assert by_time[close]["running"]==0
+    assert points[-1]["running"]==0
+
+
+def test_entry_chart_simultaneous_join_close_and_range_start():
+    from datetime import timedelta
+    from backoffice.store import entry_history_points
+    start=datetime(2026,10,29,8,tzinfo=timezone.utc)
+    switch=start+timedelta(seconds=30)
+    schedule={"enabled":False,"timezone":"UTC","windows":[]}
+    points=entry_history_points(schedule,[(start-timedelta(minutes=1),start),(start,switch),(switch,None)],start,start+timedelta(minutes=1),1)
+    assert all(p["running"]==1 and p["scheduled"]==0 for p in points)

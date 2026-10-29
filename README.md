@@ -72,3 +72,11 @@ Browser smoke checks use the running loopback preview; artifacts are ignored. Th
 `ScheduleController.schedule_controller.pilot` now provides a bounded single-PC pilot using the actual planner, authenticated PokerController sessions, SQL command journal/account leases, lobby/seat snapshots, machine heartbeats and account-session lifecycle. It is being live-tested before the eight-account run. It is not yet the distributed Azure queue consumer/timer Function. Outside the bounded pilot, leave scheduling disabled. Allowed-site settings are persisted but do not re-register the current PDecision machine automatically.
 
 Existing pre-Nenad hand histories retain their original customer ownership and are intentionally absent from the Nenad report.
+
+## Table chat
+
+The Chat page lists conversations and currently seated bots for the selected customer/site. Operators can send an explicit message as a selected bot; viewers can read. Incoming messages from known bot accounts are distinguished from human messages. Unread counts are per signed-in user and conversation, with in-app alerts on every page and optional desktop notifications enabled by the user.
+
+The local PokerController worker implements the Evenbet Chat protocol used in hopperv2. Update both PokerController and ScheduleController, then restart the worker through its seat-preserving recovery flow. A chat heartbeat enables the composer only when that worker is connected. The queue pins each request to the selected entry and worker epoch; duplicate request IDs do not send twice. A send is confirmed by its chat echo. Interrupted or unconfirmed sends are never automatically retried. History does not generate new-message notifications.
+
+Schema: ScheduleController migration `011_table_chat.sql`. No chat text is automatically generated or sent by the scheduler.

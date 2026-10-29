@@ -86,8 +86,69 @@ def test_account_session_settings_and_synthetic_guard(store):
     store.update_account(1,row["id"],row)
     saved=next(a for a in store.accounts(1)["items"] if a["id"]==row["id"])
     assert (saved["session_min_minutes"],saved["session_max_minutes"],saved["session_cooldown_minutes"])==(80,150,8)
+    store.db.execute("UPDATE TOP(1) scheduler.AccountPolicy SET DeletedUtc=NULL WHERE SiteId=1 AND IsSynthetic=1")
     data=store.accounts(1)
     synthetic=next(a for a in data["items"] if a["synthetic"])
     with pytest.raises(Error) as e:
         store.update_account(1,synthetic["id"],{**synthetic,"version":data["version"],"enabled":True})
     assert e.value.status==400
+
+
+def test_machine_timeout_closes_sessions_at_deadline_and_fences_worker(store):
+    db=store.db
+    history=db.one("SELECT TOP(1) EntryId,SessionId FROM scheduler.Entry WHERE SiteId=1 AND MachineId=1 AND SessionId IS NOT NULL ORDER BY CreatedUtc DESC")
+    if not history:
+        pytest.skip("Needs a historical machine entry")
+    # All changes are rolled back by the fixture, including epoch and heartbeat.
+    db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE SiteId=1 AND MachineId=1 AND IsOpen=1")
+    db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=CASE WHEN StartedUtc>SYSUTCDATETIME() THEN StartedUtc ELSE SYSUTCDATETIME() END WHERE SiteId=1 AND MachineId=1 AND IsOpen=1")
+    db.execute("UPDATE scheduler.Entry SET IsOpen=1,Status='seated',CreatedUtc=DATEADD(hour,-1,SYSUTCDATETIME()),SeatedUtc=DATEADD(hour,-1,SYSUTCDATETIME()),ClosedUtc=NULL WHERE EntryId=%s",history["EntryId"])
+    db.execute("UPDATE scheduler.AccountSession SET IsOpen=1,StartedUtc=DATEADD(hour,-1,SYSUTCDATETIME()),PlannedEndUtc=DATEADD(hour,1,SYSUTCDATETIME()),ActualEndUtc=NULL WHERE SessionId=%s",history["SessionId"])
+    db.execute("UPDATE scheduler.MachineAssignment SET IsReady=1,LastHeartbeatUtc=DATEADD(second,-179,SYSUTCDATETIME()) WHERE SiteId=1 AND MachineId=1")
+    pending=db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE SiteId=1 AND MachineId=1 AND EntryId<>%s AND (BotAccountId<>(SELECT BotAccountId FROM scheduler.Entry WHERE EntryId=%s) OR TableId<>(SELECT TableId FROM scheduler.Entry WHERE EntryId=%s))",history["EntryId"],history["EntryId"],history["EntryId"])
+    assert pending
+    db.execute("UPDATE scheduler.Entry SET IsOpen=1,Status='reserved',SeatedUtc=NULL,ClosedUtc=NULL WHERE EntryId=%s",pending["EntryId"])
+    machine_counts=next(m for m in store.machines(1)["items"] if m["id"]==1)
+    assert machine_counts["entries"]==1
+    assert machine_counts["pending_entries"]==1
+    before=db.one("SELECT WorkerEpoch FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1")
+    db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=14004")
+    assert db.one("SELECT IsOpen FROM scheduler.Entry WHERE EntryId=%s",history["EntryId"])["IsOpen"]
+    db.execute("UPDATE scheduler.MachineAssignment SET LastHeartbeatUtc=DATEADD(second,-181,SYSUTCDATETIME()) WHERE SiteId=1 AND MachineId=1")
+    deadline=db.one("SELECT DATEADD(second,180,LastHeartbeatUtc) AS deadline FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1")["deadline"]
+    db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=1")
+    assert db.one("SELECT IsOpen FROM scheduler.Entry WHERE EntryId=%s",history["EntryId"])["IsOpen"]
+    db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=14004")
+    entry=db.one("SELECT IsOpen,ClosedUtc FROM scheduler.Entry WHERE EntryId=%s",history["EntryId"])
+    session=db.one("SELECT IsOpen,ActualEndUtc,EndReason FROM scheduler.AccountSession WHERE SessionId=%s",history["SessionId"])
+    machine=db.one("SELECT WorkerEpoch,IsReady FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1")
+    assert not entry["IsOpen"] and entry["ClosedUtc"]==deadline
+    assert not session["IsOpen"] and session["ActualEndUtc"]==deadline and session["EndReason"]=="machine_offline"
+    assert not machine["IsReady"] and machine["WorkerEpoch"]!=before["WorkerEpoch"]
+    db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=14004")
+    assert db.one("SELECT WorkerEpoch FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1")=={"WorkerEpoch":machine["WorkerEpoch"]}
+
+
+@pytest.mark.parametrize("status",["all","pending","claimed","succeeded","failed","cancelled","expired","uncertain"])
+def test_task_status_filter_matches_count_and_items(store,status):
+    result=store.tasks(1,{"status":status,"page_size":"10"})
+    expected=store.db.one("SELECT COUNT(*) AS n FROM scheduler.Command WHERE SiteId=1 AND (%s='all' OR Status=%s)",status,status)["n"]
+    assert result["total"]==expected
+    assert all(status=="all" or row["status"]==status for row in result["items"])
+    with pytest.raises(Error) as error:
+        store.tasks(1,{"status":"invalid"})
+    assert error.value.status==400
+
+
+def test_session_result_filter(store):
+    baseline=store.sessions(1,{"page_size":"100"})
+    for value in ["active","scheduled","closed",*baseline["result_options"]]:
+        result=store.sessions(1,{"result":value,"page_size":"100"})
+        for item in result["items"]:
+            if value=="active": assert item["is_open"] and not item["is_scheduled"]
+            elif value=="scheduled": assert item["is_scheduled"]
+            elif value=="closed": assert not item["is_open"]
+            else: assert not item["is_open"] and item["end_reason"]==value
+        assert result["total"]>=len(result["items"])
+    with pytest.raises(Error):
+        store.sessions(1,{"result":"invalid"})

@@ -107,13 +107,27 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation|chat)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
             # Scope checked before any resource-specific query (including downloads).
             store.site(sid)
             method = request.method
+            if section == "chat":
+                from .chat import Chat
+                chat=Chat(store)
+                if method=="GET" and tail is None:
+                    return response(chat.summary(sid))
+                parts=(tail or '').split('/')
+                table_id=parts[0]
+                if method=="GET" and len(parts)==1:
+                    return response(chat.messages(sid,table_id,request.query))
+                if method=="POST" and len(parts)==2 and parts[1]=='read':
+                    return response(chat.read(sid,table_id,body))
+                if method=="POST" and len(parts)==2 and parts[1]=='send':
+                    return response(chat.send(sid,table_id,body),202)
+                raise Error(404,'Chat endpoint not found')
             if section == "simulation" and method == "POST" and tail is None:
                 from decimal import Decimal
                 from schedule_controller.rules import Band

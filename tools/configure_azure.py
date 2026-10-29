@@ -52,6 +52,8 @@ def main():
             "backoffice.AccessRequest":"SELECT,INSERT","backoffice.AuditLog":"SELECT,INSERT",
             "backoffice.MachineMetadata":"SELECT,UPDATE","backoffice.MachineAllowedSite":"SELECT,INSERT,DELETE",
             "scheduler.Site":"SELECT,UPDATE","scheduler.AccountPolicy":"SELECT,INSERT,UPDATE",
+            "scheduler.ChatMessage":"SELECT","scheduler.ChatAgent":"SELECT",
+            "scheduler.ChatCommand":"SELECT,INSERT","backoffice.ChatReadState":"SELECT,INSERT,UPDATE",
             "scheduler.AccountDay":"SELECT","scheduler.Entry":"SELECT","scheduler.AccountLease":"SELECT",
             "scheduler.AccountSession":"SELECT","scheduler.Command":"SELECT","scheduler.MachineTelemetry":"SELECT",
             "scheduler.ScheduleWindow":"SELECT","scheduler.StakeBand":"SELECT,UPDATE",
@@ -60,6 +62,7 @@ def main():
         for table,rights in permissions.items():
             db.execute(f"GRANT {rights} ON OBJECT::{table} TO [poker_backoffice_app]")
         db.execute("GRANT EXECUTE ON OBJECT::scheduler.SetSchedule TO [poker_backoffice_app]")
+        db.execute("GRANT EXECUTE ON OBJECT::scheduler.ExpireOfflineMachines TO [poker_backoffice_app]")
         conn.commit()
     finally:
         conn.close()
