@@ -73,8 +73,16 @@ def test_worker_deduplication_classification_and_at_most_once_claim(chat):
     from schedule_controller.chat_repository import ChatRepository
     epoch=chat.db.one('SELECT WorkerEpoch FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1')['WorkerEpoch']
     class Adapter:
-        def one(self,sql,*args): return chat.db.one(sql.replace('?','%s'),*args)
-        def execute(self,sql,*args): return chat.db.execute(sql.replace('?','%s'),*args)
+        def bind(self,sql,args):
+            from schedule_controller.pilot_repository import DB
+            sql,args=DB(None).bind(sql,args)
+            return sql.replace('?','%s'),args
+        def one(self,sql,*args):
+            sql,args=self.bind(sql,args)
+            return chat.db.one(sql,*args)
+        def execute(self,sql,*args):
+            sql,args=self.bind(sql,args)
+            return chat.db.execute(sql,*args)
     class Repo(ChatRepository):
         @contextmanager
         def transaction(self): yield Adapter()

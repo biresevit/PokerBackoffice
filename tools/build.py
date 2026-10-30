@@ -12,7 +12,7 @@ TARGET = ROOT / "api" / "schedule_controller"
 def main():
     TARGET.mkdir(exist_ok=True)
     checksums = {}
-    for name in ("__init__.py", "rules.py", "planner.py", "timeline.py"):
+    for name in ("__init__.py", "rules.py", "planner.py", "timeline.py", "update_rollouts.py"):
         source = SOURCE / name
         shutil.copyfile(source, TARGET / name)
         checksums[name] = hashlib.sha256(source.read_bytes()).hexdigest()

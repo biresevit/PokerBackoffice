@@ -80,3 +80,7 @@ The Chat page lists conversations and currently seated bots for the selected cus
 The local PokerController worker implements the Evenbet Chat protocol used in hopperv2. Update both PokerController and ScheduleController, then restart the worker through its seat-preserving recovery flow. A chat heartbeat enables the composer only when that worker is connected. The queue pins each request to the selected entry and worker epoch; duplicate request IDs do not send twice. A send is confirmed by its chat echo. Interrupted or unconfirmed sends are never automatically retried. History does not generate new-message notifications.
 
 Schema: ScheduleController migration `011_table_chat.sql`. No chat text is automatically generated or sent by the scheduler.
+
+## Rolling updates
+
+The Updates page schedules signed PDecision/PokerController releases one PC at a time, with gradual session draining, health verification, traffic recovery and rollback. See [rolling updates](docs/rolling-updates.md) for enrollment, publishing and verification.

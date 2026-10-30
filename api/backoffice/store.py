@@ -81,6 +81,18 @@ def live_table_sort_key(row):
             -row["bot_entries"], -row["occupied"], row["big_blind"], row["name"])
 
 
+def machine_health(row):
+    heartbeat=row.get("heartbeat")
+    row["online"] = bool(row.get("ready") and heartbeat and
+        heartbeat >= datetime.now(timezone.utc).replace(tzinfo=None)-timedelta(seconds=180))
+    warnings=[]
+    if row.get("average_cpu") is not None and row["average_cpu"]>=90: warnings.append("CPU has averaged at least 90% for 15 minutes")
+    if row.get("average_memory") is not None and row["average_memory"]>=90: warnings.append("Memory usage has averaged at least 90% for 15 minutes")
+    if row.get("average_disk") is not None and row["average_disk"]>=90: warnings.append("Disk has less than 10% free space")
+    row["warnings"]=warnings
+    return row
+
+
 @dataclass(frozen=True)
 class Context:
     customer_id: int
@@ -99,7 +111,7 @@ def memberships(db, principal):
 class Store:
     def __init__(self, db, context: Context):
         self.db, self.ctx = db, context
-        self._offline_expired = False
+        self._site_cache = {}
 
     def sites(self):
         return self.db.rows("""SELECT SiteId AS id,Casino AS name,Platform AS platform,TimeZone AS timezone,
@@ -107,6 +119,8 @@ class Store:
             FROM scheduler.Site WHERE CustomerId=%s ORDER BY Casino""", self.ctx.customer_id)
 
     def site(self, site_id, *, lock=False, version=None):
+        if not lock and site_id in self._site_cache:
+            return self._site_cache[site_id]
         hint = "WITH(UPDLOCK,HOLDLOCK)" if lock else ""
         result = self.db.one(f"""SELECT SiteId AS id,Casino AS name,CustomerId AS customer_id,TimeZone AS timezone,
             CurrencyCode AS currency,ConfigVersion AS version,SchedulingEnabled AS enabled
@@ -118,12 +132,13 @@ class Store:
                 raise Error(403, "Your account has view-only access")
             if integer(version, 1, 2**63 - 1, "configuration version") != result["version"]:
                 raise Error(409, "Settings changed since this page was loaded. Refresh and try again.")
-        if not self._offline_expired:
-            self.db.execute("EXEC scheduler.ExpireOfflineMachines @CustomerId=%s", self.ctx.customer_id)
-            self._offline_expired = True
+        # Reads must not hold cleanup write locks through the whole response.
+        # The scheduler owns cleanup; reporting views apply heartbeat expiry.
+        self._site_cache[site_id] = result
         return result
 
     def bump(self, site_id):
+        self._site_cache.pop(site_id,None)
         self.db.execute("UPDATE scheduler.Site SET ConfigVersion=ConfigVersion+1,UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s", site_id)
 
     def audit(self, action, entity, details):
@@ -142,7 +157,8 @@ class Store:
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
             COALESCE(d.SessionSeconds,0) AS played_seconds,
-            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1) AS entries
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries
             FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
             LEFT JOIN scheduler.AccountDay d ON d.SiteId=p.SiteId AND d.BotAccountId=p.BotAccountId AND d.LocalDate=%s
             WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""", today, site_id)
@@ -325,10 +341,12 @@ class Store:
             FROM scheduler.LobbyTable t
             WHERE t.SiteId=%s
               AND t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
+              AND t.FullSnapshotUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
+              AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment o WHERE o.SiteId=t.SiteId AND o.MachineId=t.ObserverMachineId AND o.WorkerEpoch=t.ObserverEpoch AND o.IsReady=1 AND o.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()))
             ORDER BY t.BigBlind,t.TableName""", site_id)
         for row in rows:
             row["players"] = self.db.rows("""SELECT s.SeatIndex AS seat,s.Username AS username,s.Stack AS stack,
-                s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,s.BotAccountId AS account_id,
+                s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,COALESCE(s.BotAccountId,(SELECT TOP(1) b.BotAccountId FROM dbo.BotAccount b JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId WHERE p.SiteId=s.SiteId AND b.Username=s.Username)) AS account_id,
                 (SELECT TOP(1) e.MachineId FROM scheduler.Entry e WHERE e.SiteId=s.SiteId AND e.TableId=s.TableId
                  AND e.BotAccountId=s.BotAccountId AND e.IsOpen=1) AS machine_id
                 FROM scheduler.TableSeat s WHERE s.SiteId=%s AND s.TableId=%s ORDER BY s.SeatIndex""", site_id, row["id"])
@@ -383,6 +401,10 @@ class Store:
         row['payload']=json.loads(row['payload']) if row['payload'] else None
         if row['payload']:
             row['payload'].setdefault('game',row['game'])
+        if self.ctx.role=='operator':
+            from .manual import Manual
+            row['manual']=Manual(self).status(site_id,request_id)
+        else:row['manual']={'enabled':False,'read_only':True}
         return row
 
     def machines(self, site_id):
@@ -390,7 +412,7 @@ class Store:
         rows = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,
             m.Casino AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
             a.MaxEntries AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
-            a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,
+            a.MaintenanceTaskId AS maintenance_task_id,a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,
             latest.SampledUtc AS telemetry_at,latest.CpuPercent AS cpu_percent,
             latest.MemoryPercent AS memory_percent,latest.DiskPercent AS disk_percent,
             latest.DiskFreeBytes AS disk_free_bytes,latest.DiskTotalBytes AS disk_total_bytes,
@@ -398,12 +420,12 @@ class Store:
             latest.PDecisionVersion AS pdecision_version,
             averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,
             averages.AvgDisk AS average_disk,
-            (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND e.Status IN ('seated','sitting_out','draining')) AS entries,
-            (SELECT COUNT(*) FROM scheduler.Entry e JOIN scheduler.Site s ON s.SiteId=e.SiteId
+               AND e.IsConfirmedSeat=1) AS entries,
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND e.Status IN ('reserved','joining','uncertain')) AS pending_entries
+               AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS pending_entries
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
             OUTER APPLY (SELECT TOP(1) t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.DiskPercent,
@@ -417,14 +439,7 @@ class Store:
             WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""", self.ctx.customer_id)
         for row in rows:
             row["allowed_sites"] = [r["SiteId"] for r in self.db.rows("SELECT SiteId FROM backoffice.MachineAllowedSite WHERE MachineId=%s", row["id"])]
-            heartbeat=row.get("heartbeat")
-            row["online"] = bool(row.get("ready") and heartbeat and
-                heartbeat >= datetime.now(timezone.utc).replace(tzinfo=None)-timedelta(seconds=180))
-            warnings=[]
-            if row.get("average_cpu") is not None and row["average_cpu"]>=90: warnings.append("CPU has averaged at least 90% for 15 minutes")
-            if row.get("average_memory") is not None and row["average_memory"]>=90: warnings.append("Memory usage has averaged at least 90% for 15 minutes")
-            if row.get("average_disk") is not None and row["average_disk"]>=90: warnings.append("Disk has less than 10% free space")
-            row["warnings"]=warnings
+            machine_health(row)
         return {"items": rows, "sites": self.sites()}
 
     def machine_metrics(self, site_id, machine_id, query):
@@ -452,42 +467,36 @@ class Store:
         machine=str(query.get("machine") or "").strip()[:100]
         bot=str(query.get("bot") or "").strip()[:100]
         kind=str(query.get("kind") or "all").lower()
-        if kind not in ("all","join","leave","scan"):
-            raise Error(400,"Invalid task type")
+        if kind not in ("all","join","leave","scan","update"):raise Error(400,"Invalid task type")
         status=str(query.get("status") or "all").lower()
-        if status not in ("all","pending","claimed","succeeded","failed","cancelled","expired","uncertain"):
-            raise Error(400,"Invalid task status")
+        if status not in ("all","pending","claimed","succeeded","failed","cancelled","expired","uncertain"):raise Error(400,"Invalid task status")
         page=integer(query.get("page",1),1,100000,"page")
         size=integer(query.get("page_size",50),10,100,"page size")
-        if size not in (10,20,50,100): raise Error(400,"Page size must be 10, 20, 50 or 100")
-        pattern=lambda value: "%"+value+"%"
-        where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR
-            COALESCE(x.HostName,m.Description,'') LIKE %s) AND (%s='' OR b.Username LIKE %s)
-            AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)"""
-        args=(site_id,machine,machine,pattern(machine),bot,pattern(bot),kind,kind,status,status)
-        total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.Command c
-            JOIN scheduler.Entry e ON e.EntryId=c.EntryId JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
-            JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
-            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId WHERE {where}""",*args)["n"]
-        items=self.db.rows(f"""SELECT c.CommandId AS id,c.Kind AS kind,c.Status AS status,
-            c.CreatedUtc AS created,c.UpdatedUtc AS updated,c.NotBeforeUtc AS due,c.AttemptCount AS attempts,
-            c.ResultCode AS result_code,c.ResultText AS result_text,e.TableId AS table_id,
-            b.Username AS bot,c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
-            FROM scheduler.Command c JOIN scheduler.Entry e ON e.EntryId=c.EntryId
-            JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
-            JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
-            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
-            WHERE {where} ORDER BY c.CreatedUtc DESC,c.CommandId
-            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY""",*args,(page-1)*size,size)
-        choices=self.db.rows("""SELECT DISTINCT c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
-            FROM scheduler.Command c JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId
-            LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
-            WHERE c.SiteId=%s ORDER BY machine""",site_id)
-        bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
-            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""",site_id)
-        for item in items:
-            item["result_description"]=task_result_description(item)
-        return {"items":items,"total":total,"page":page,"page_size":size,"machines":choices,"bots":bots}
+        if size not in (10,20,50,100):raise Error(400,"Page size must be 10, 20, 50 or 100")
+        cte="""WITH TaskRows AS(
+            SELECT c.CommandId AS TaskId,c.SiteId,c.MachineId,c.Kind,c.Status,c.CreatedUtc,c.UpdatedUtc,
+                c.NotBeforeUtc,c.AttemptCount,c.ResultCode,c.ResultText,e.TableId,b.Username AS Bot
+            FROM scheduler.Command c JOIN scheduler.Entry e ON e.EntryId=c.EntryId JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+            UNION ALL
+            SELECT t.TaskId,t.SiteId,t.MachineId,'update',
+                CASE WHEN t.Status='queued' THEN 'pending' WHEN t.Status='completed' THEN 'succeeded'
+                     WHEN t.Status IN ('failed','rolled_back') THEN 'failed' WHEN t.Status='cancelled' THEN 'cancelled' ELSE 'claimed' END,
+                r.CreatedUtc,t.UpdatedUtc,r.NotBeforeUtc,CASE WHEN t.StartedUtc IS NULL THEN 0 ELSE 1 END,t.Status,t.Detail,'','All sessions'
+            FROM scheduler.MachineUpdateTask t JOIN scheduler.UpdateRollout r ON r.RolloutId=t.RolloutId)
+            """
+        where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR COALESCE(x.HostName,m.Description,'') LIKE %s)
+            AND (%s='' OR c.Bot LIKE %s) AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)"""
+        args=(site_id,machine,machine,'%'+machine+'%',bot,'%'+bot+'%',kind,kind,status,status)
+        joins=" FROM TaskRows c JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId "
+        total=self.db.one(cte+'SELECT COUNT(*) AS n'+joins+'WHERE '+where,*args)['n']
+        items=self.db.rows(cte+"""SELECT c.TaskId AS id,c.Kind AS kind,c.Status AS status,c.CreatedUtc AS created,
+            c.UpdatedUtc AS updated,c.NotBeforeUtc AS due,c.AttemptCount AS attempts,c.ResultCode AS result_code,
+            c.ResultText AS result_text,c.TableId AS table_id,c.Bot AS bot,c.MachineId AS machine_id,
+            COALESCE(x.HostName,m.Description) AS machine"""+joins+'WHERE '+where+" ORDER BY c.CreatedUtc DESC,c.TaskId OFFSET %s ROWS FETCH NEXT %s ROWS ONLY",*args,(page-1)*size,size)
+        choices=self.db.rows(cte+"""SELECT DISTINCT c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine"""+joins+'WHERE c.SiteId=%s ORDER BY machine',site_id)
+        bots=self.db.rows("SELECT b.Username AS username FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username",site_id)
+        for item in items:item['result_description']=task_result_description(item)
+        return {'items':items,'total':total,'page':page,'page_size':size,'machines':choices,'bots':bots}
 
     def sessions(self,site_id,query):
         site=self.site(site_id)
@@ -503,7 +512,7 @@ class Store:
         result=str(query.get("result") or "all").strip()
         if len(result)>80:
             raise Error(400,"Invalid session result")
-        result_options=[r["reason"] for r in self.db.rows("SELECT DISTINCT EndReason AS reason FROM scheduler.AccountSession WHERE SiteId=%s AND IsOpen=0 AND EndReason IS NOT NULL ORDER BY EndReason",site_id)]
+        result_options=[r["reason"] for r in self.db.rows("SELECT DISTINCT EndReason AS reason FROM backoffice.SessionActivity WHERE SiteId=%s AND IsOpen=0 AND EndReason IS NOT NULL ORDER BY EndReason",site_id)]
         if result not in ("all","active","scheduled","closed",*result_options):
             raise Error(400,"Invalid session result")
         page=integer(query.get("page",1),1,100000,"page");size=integer(query.get("page_size",50),10,100,"page size")
@@ -512,7 +521,7 @@ class Store:
             CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN 'scheduled'
                  WHEN s.IsOpen=1 THEN 'active' ELSE COALESCE(s.EndReason,'closed') END=%s)"""
         args=(site_id,stop,start,bot,"%"+bot+"%",result,result,result)
-        total=self.db.one(f"""SELECT COUNT(*) AS n FROM scheduler.AccountSession s
+        total=self.db.one(f"""SELECT COUNT(*) AS n FROM backoffice.SessionActivity s
             JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId WHERE {where}""",*args)["n"]
         items=self.db.rows(f"""SELECT s.SessionId AS id,b.Username AS bot,s.MachineId AS machine_id,
             COALESCE(x.HostName,m.Description) AS machine,s.StartedUtc AS started,s.PlannedEndUtc AS planned_end,
@@ -520,8 +529,12 @@ class Store:
             CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN CONVERT(bit,1) ELSE CONVERT(bit,0) END AS is_scheduled,
             CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN 0
                  ELSE DATEDIFF(second,s.StartedUtc,COALESCE(s.ActualEndUtc,SYSUTCDATETIME())) END AS duration_seconds,
-            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SessionId=s.SessionId) AS entries
-            FROM scheduler.AccountSession s JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SessionId=s.SessionId AND (s.IsOpen=0 OR (e.IsOpen=1 AND e.IsConfirmedSeat=1))) AS entries,
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SessionId=s.SessionId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS current_entries,
+            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SessionId=s.SessionId) AS total_entries,
+            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SessionId=s.SessionId AND e.Status='failed') AS failed_entries,
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SessionId=s.SessionId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries
+            FROM backoffice.SessionActivity s JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId
             JOIN dbo.CustomerMachine m ON m.MachineId=s.MachineId
             LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             WHERE {where} ORDER BY s.StartedUtc DESC,s.SessionId
@@ -562,9 +575,23 @@ class Store:
 
     def overview(self, site_id):
         site = self.site(site_id)
-        accounts = self.accounts(site_id)["items"]
-        machines = self.machines(site_id)["items"]
-        entries = self.db.rows("SELECT Status AS status,COUNT(*) AS count FROM scheduler.Entry WHERE SiteId=%s AND IsOpen=1 GROUP BY Status", site_id)
+        accounts = self.db.one("""SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN p.IsSynthetic=1 THEN 1 ELSE 0 END),0) AS synthetic
+            FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
+            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL""",site_id)
+        machines = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,
+            a.IsReady AS ready,a.LastHeartbeatUtc AS heartbeat,
+            averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,averages.AvgDisk AS average_disk
+            FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
+            LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+            OUTER APPLY(SELECT AVG(CONVERT(float,t.CpuPercent)) AS AvgCpu,
+                AVG(CONVERT(float,t.MemoryPercent)) AS AvgMemory,AVG(CONVERT(float,t.DiskPercent)) AS AvgDisk
+                FROM scheduler.MachineTelemetry t WHERE t.SiteId=a.SiteId AND t.MachineId=m.MachineId
+                    AND t.SampledUtc>=DATEADD(minute,-15,SYSUTCDATETIME())) averages
+            WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""",self.ctx.customer_id)
+        for machine in machines:machine_health(machine)
+        entries = self.db.rows("""SELECT CASE WHEN IsConfirmedSeat=1 THEN 'seated' WHEN Status IN ('reserved','joining') THEN Status ELSE 'uncertain' END AS status,COUNT(*) AS count
+            FROM backoffice.EntryPresence WHERE SiteId=%s AND IsOpen=1 AND IsLiveOwner=1
+            GROUP BY CASE WHEN IsConfirmedSeat=1 THEN 'seated' WHEN Status IN ('reserved','joining') THEN Status ELSE 'uncertain' END""",site_id)
         zone=ZoneInfo(site["timezone"]);local_now=datetime.now(timezone.utc).astimezone(zone)
         today=datetime.combine(local_now.date(),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
         month=datetime.combine(local_now.date()-timedelta(days=29),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
@@ -577,7 +604,7 @@ class Store:
         online=sum(1 for machine in machines if machine["online"])
         warnings=[{"machine":m["name"] or f"Machine {m['id']}","message":warning}
                   for m in machines for warning in m["warnings"]]
-        return {"site": site, "accounts": len(accounts), "synthetic_accounts": sum(bool(a["synthetic"]) for a in accounts),
+        return {"site": site, "accounts": accounts["total"], "synthetic_accounts": accounts["synthetic"],
                 "entries": entries, "scheduled_target": scheduled_target(schedule), "machines": machines,
                 "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings},
                 "hand_histories": history, "schedule": schedule}
@@ -604,7 +631,7 @@ class Store:
         if stop <= start:
             raise Error(400, "The selected range has not started yet")
         step_minutes = 1 if days <= 2 else 30 if days <= 14 else 120
-        rows = self.db.rows("""SELECT SeatedUtc AS seated,ClosedUtc AS closed
+        rows = self.db.rows("""SELECT SeatedUtc AS seated,CASE WHEN LastConfirmedUtc IS NOT NULL AND (ClosedUtc IS NULL OR ClosedUtc>DATEADD(second,60,LastConfirmedUtc)) THEN DATEADD(second,60,LastConfirmedUtc) ELSE ClosedUtc END AS closed
             FROM scheduler.Entry WHERE SiteId=%s AND SeatedUtc IS NOT NULL
               AND SeatedUtc<%s AND (ClosedUtc IS NULL OR ClosedUtc>%s)""",
             site_id, stop.replace(tzinfo=None), start.replace(tzinfo=None))
@@ -613,5 +640,8 @@ class Store:
             row["closed"].replace(tzinfo=timezone.utc) if row["closed"] else None
         ) for row in rows]
         points = entry_history_points(schedule, intervals, start, stop, step_minutes)
+        if requested_stop>=datetime.now(timezone.utc) and points:
+            live=self.db.one('SELECT COUNT(*) AS n FROM backoffice.EntryPresence WHERE SiteId=%s AND IsOpen=1 AND IsConfirmedSeat=1',site_id)['n']
+            points[-1]['running']=live
         return {"from": from_day.isoformat(), "to": to_day.isoformat(), "timezone": site["timezone"],
                 "step_minutes": step_minutes, "points": points}

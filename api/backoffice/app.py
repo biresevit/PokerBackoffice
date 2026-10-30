@@ -73,6 +73,28 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 db.one("SELECT TOP(1) 1 AS ok FROM backoffice.Membership")
             return response({"status": "ready"})
         headers = {k.lower(): v for k, v in request.headers.items()}
+        setup=re.fullmatch(r"/api/setup/(request|poll|complete|restore)",request.path)
+        if setup:
+            if request.method!='POST':raise Error(405,'Method not allowed')
+            if len(request.body)>16384:raise Error(413,'Request is too large')
+            try:
+                setup_body=json.loads(request.body or b'{}')
+                if not isinstance(setup_body,dict):raise ValueError()
+            except (ValueError,UnicodeError):raise Error(400,'Invalid setup request')
+            from .pairing import public_request
+            with session_factory() as db:
+                return response(public_request(db,setup[1],setup_body,headers.get('x-forwarded-for','unknown').split(',')[0].strip()))
+        updater=re.fullmatch(r"/api/updater/(\d+)/(poll|report|status)",request.path)
+        if updater:
+            if request.method!='POST':raise Error(405,'Method not allowed')
+            if len(request.body)>32768:raise Error(413,'Request is too large')
+            try:
+                agent_body=json.loads(request.body or b'{}')
+                if not isinstance(agent_body,dict):raise ValueError()
+            except (ValueError,UnicodeError):raise Error(400,'Invalid updater request')
+            from .updates import agent_request
+            with session_factory() as db:
+                return response(agent_request(db,int(updater[1]),headers,agent_body,updater[2]))
         user = principal(headers) if local_context is None else {
             "identityProvider": local_context.provider, "userId": local_context.subject, "userDetails": "Local preview"}
         if len(request.body) > 2 * 1024 * 1024:
@@ -107,13 +129,24 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation|chat)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation|chat|updates)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
             # Scope checked before any resource-specific query (including downloads).
             store.site(sid)
             method = request.method
+            if section == "updates":
+                from .updates import Updates
+                updates=Updates(store)
+                if method=='GET' and tail is None:return response(updates.list(sid))
+                if method=='POST' and tail is None:return response(updates.create(sid,body),202)
+                if method=='POST' and tail in ('pairing/lookup','pairing/approve'):
+                    from .pairing import lookup,approve
+                    return response((lookup if tail.endswith('lookup') else approve)(store,sid,body))
+                if method=='POST' and tail=='enroll':return response(updates.enroll(sid,body))
+                if method=='POST' and tail:return response(updates.control(sid,tail,body))
+                raise Error(405,'Method not allowed')
             if section == "chat":
                 from .chat import Chat
                 chat=Chat(store)
@@ -151,6 +184,10 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                     return Response(200, hh.download(sid, body.get("ids"), body.get("filters") if body.get("all") is True else None), {"Content-Type": "application/zip", "Cache-Control": "no-store",
                         "Content-Disposition": 'attachment; filename="hand-histories.zip"', "X-Content-Type-Options": "nosniff"})
             if section == "tables":
+                control=re.fullmatch(r"live/([0-9a-fA-F-]+)/(manual|action)",tail or '')
+                if method=='POST' and control:
+                    from .manual import Manual
+                    return response(getattr(Manual(store),'mode' if control[2]=='manual' else 'action')(sid,control[1],body))
                 if method == "POST" and tail == "live":
                     return response(store.request_live_view(sid,body.get("table_id"),body.get("account_id")))
                 if method == "GET" and tail and tail.startswith("live/"):

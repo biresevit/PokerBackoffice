@@ -140,22 +140,32 @@ def test_live_table_default_order_groups_ring_formats_before_tournaments():
     assert ordered[0]["bot_entries"]==2
 
 
-def test_offline_expiration_runs_once_after_customer_authorization():
+def test_site_reads_authorize_without_cleanup_writes():
     class DB:
-        calls = []
+        def __init__(self):self.reads=[]
         def one(self, sql, *params):
+            self.reads.append(params)
             return {"version":1} if params == (1,14004) else None
         def execute(self, sql, *params):
-            self.calls.append((sql,params))
+            raise AssertionError('A page read attempted a write')
     db=DB()
     store=Store(db,Context(14004,"test","subject","viewer"))
     store.site(1)
     store.site(1)
-    assert db.calls == [("EXEC scheduler.ExpireOfflineMachines @CustomerId=%s",(14004,))]
-    db.calls.clear()
+    assert db.reads == [(1,14004)]
     with pytest.raises(Error):
         Store(db,Context(1,"test","foreign","viewer")).site(1)
-    assert db.calls == []
+    assert db.reads[-1] == (1,1)
+
+
+def test_cached_site_never_bypasses_a_fresh_settings_version_check():
+    class DB:
+        version=1
+        def one(self,sql,*params):return {'version':self.version}
+    db=DB();store=Store(db,Context(14004,'test','subject','operator'))
+    store.site(1);db.version=2
+    with pytest.raises(Error) as error:store.site(1,lock=True,version=1)
+    assert error.value.status==409
 
 
 def test_task_result_descriptions_explain_cancellations_and_missing_details():

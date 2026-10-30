@@ -6,3 +6,5 @@ pyOpenSSL>=26.1,<26.2
 certifi>=2025
 tzdata>=2025.2
 
+
+cryptography>=46,<47
