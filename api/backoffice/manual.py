@@ -79,22 +79,43 @@ class Manual:
         current=self.current(row);p,entry=self.fresh(row)
         if not current or not current['Enabled'] or str(current['RequestId'])!=str(row['RequestId']) or str(current['WorkerEpoch'])!=str(entry['WorkerEpoch']):raise Error(409,'Enable manual control for this hero first.')
         o=p.get('manual',{});key=body.get('turn_key','');action=body.get('action')
+        if action in ('sit_out','sit_in'):return self.table_command(site_id,row,entry,o,action)
         if not re.fullmatch('[0-9a-f]{64}',str(key)) or key!=o.get('turn_key'):raise Error(409,'The turn changed. Wait for the current action controls.')
         if action not in o.get('actions',[]):raise Error(400,'That action is not available on this turn.')
         if self.db.one('SELECT TurnKey FROM scheduler.TableActionClaim WHERE SiteId=%s AND BotAccountId=%s AND TableId=%s AND TurnKey=%s',site_id,row['BotAccountId'],row['TableId'],key):raise Error(409,'An action has already been submitted for this turn.')
-        existing=self.db.one('SELECT ActionId,Status FROM scheduler.ManualTableAction WHERE RequestId=%s AND TurnKey=%s',row['RequestId'],key)
+        # A refused action (failed/expired) does not use up the turn; the operator may choose again.
+        existing=self.db.one("""SELECT ActionId,Status FROM scheduler.ManualTableAction WHERE RequestId=%s AND TurnKey=%s
+            AND Status IN ('queued','submitted','sent','uncertain')""",row['RequestId'],key)
         if existing:return {'action_id':str(existing['ActionId']),'status':existing['Status']}
         amount=target_minor(body.get('amount')) if action in ('bet','raise') else None
-        if amount is not None and not o['min_target_minor']<=amount<=o['max_target_minor']:raise Error(400,'Bet/raise total is outside the current table limits.')
+        if amount is not None and not o['min_target_minor']<=amount<=o['max_target_minor']:
+            raise Error(400,f"{'Bet' if action=='bet' else 'Raise to'} must be between {o['min_target_minor']/100:.2f} and {o['max_target_minor']/100:.2f}.")
         aid=str(uuid.uuid4())
         self.db.execute('''INSERT scheduler.ManualTableAction(ActionId,RequestId,SiteId,BotAccountId,TableId,MachineId,WorkerEpoch,TurnKey,Action,TargetMinor)
             VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',aid,row['RequestId'],site_id,row['BotAccountId'],row['TableId'],row['MachineId'],entry['WorkerEpoch'],key,action,amount)
         self.store.audit('tables.manual.action',aid,{'action':action,'target_minor':amount,'turn':key})
         return {'action_id':aid,'status':'queued'}
 
+    def table_command(self,site_id,row,entry,o,action):
+        """Sit out next hand / I'm back. Not tied to a turn, so each gets its own random key."""
+        if not o.get('table_commands'):raise Error(409,'Update PokerController on this machine to sit out or return from the live view.')
+        if action=='sit_in' and not o.get('away'):raise Error(409,'The hero is not sitting out.')
+        if action=='sit_out' and (o.get('away') or o.get('sit_out_pending')):raise Error(409,'The hero is already sitting out.')
+        if self.db.one("""SELECT ActionId FROM scheduler.ManualTableAction WHERE RequestId=%s AND Action IN ('sit_out','sit_in')
+            AND Status IN ('queued','submitted')""",row['RequestId']):raise Error(409,'The previous sit-out or I’m back command is still being sent.')
+        aid=str(uuid.uuid4())
+        self.db.execute('''INSERT scheduler.ManualTableAction(ActionId,RequestId,SiteId,BotAccountId,TableId,MachineId,WorkerEpoch,TurnKey,Action,TargetMinor)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)''',aid,row['RequestId'],site_id,row['BotAccountId'],row['TableId'],row['MachineId'],entry['WorkerEpoch'],uuid.uuid4().hex+uuid.uuid4().hex,action)
+        self.store.audit('tables.manual.action',aid,{'action':action})
+        return {'action_id':aid,'status':'queued'}
+
     def status(self,site_id,request_id):
         row=self.scope(site_id,request_id);c=self.current(row)
         active=bool(c and c['Enabled'] and str(c['WorkerEpoch'])==str(c['CurrentEpoch']) and c['ExpiresUtc']>datetime.now(timezone.utc).replace(tzinfo=None))
         mine=bool(c and str(c['RequestId'])==str(row['RequestId']))
-        latest=self.db.one('SELECT TOP(1) Status AS status,ResultText AS detail,TurnKey AS turn_key FROM scheduler.ManualTableAction WHERE RequestId=%s ORDER BY CreatedUtc DESC',row['RequestId'])
-        return {'enabled':active and mine,'other_window':active and not mine,'last_action':latest}
+        latest=self.db.one("""SELECT TOP(1) Status AS status,ResultText AS detail,TurnKey AS turn_key FROM scheduler.ManualTableAction
+            WHERE RequestId=%s AND Action NOT IN ('sit_out','sit_in') ORDER BY CreatedUtc DESC""",row['RequestId'])
+        command=self.db.one("""SELECT TOP(1) Action AS action,Status AS status,ResultText AS detail,
+            DATEDIFF(second,UpdatedUtc,SYSUTCDATETIME()) AS age FROM scheduler.ManualTableAction
+            WHERE RequestId=%s AND Action IN ('sit_out','sit_in') ORDER BY CreatedUtc DESC""",row['RequestId'])
+        return {'enabled':active and mine,'other_window':active and not mine,'last_action':latest,'last_command':command}

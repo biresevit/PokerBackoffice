@@ -31,8 +31,11 @@ class Database:
         if 'ManualTableControl c' in sql:return self.control
         if 'SELECT TOP(1) e.WorkerEpoch' in sql:return {'WorkerEpoch':'epoch'}
         if 'TableActionClaim' in sql:return None
-        if 'SELECT ActionId,Status' in sql:return None
+        if 'SELECT ActionId,Status' in sql:return self.active_action
+        if "Action IN ('sit_out','sit_in')" in sql:return self.pending_command
         raise AssertionError(sql)
+    active_action=None
+    pending_command=None
     def execute(self,sql,*args):self.writes.append((sql,args))
 
 
@@ -75,3 +78,44 @@ def test_valid_action_is_queued_for_exact_hero_and_turn():
     result=m.action(1,db.request,{'turn_key':'a'*64,'action':'raise','amount':'5.00'})
     assert result['status']=='queued'
     assert db.writes[0][1][-3:]==('a'*64,'raise',500)
+
+
+def manual_payload(db,**fields):
+    p=json.loads(db.row['PayloadJson']);p['manual'].update(fields);db.row['PayloadJson']=json.dumps(p)
+
+
+def test_out_of_bounds_raise_names_the_table_limits():
+    m,db=service()
+    with pytest.raises(Error,match='Raise to must be between 3.00 and 10.00'):
+        m.action(1,db.request,{'turn_key':'a'*64,'action':'raise','amount':'2.00'})
+
+
+def test_refused_action_does_not_block_a_new_choice_for_the_turn():
+    m,db=service()
+    assert m.action(1,db.request,{'turn_key':'a'*64,'action':'call'})['status']=='queued'
+    db.active_action={'ActionId':'x','Status':'sent'}
+    assert m.action(1,db.request,{'turn_key':'a'*64,'action':'fold'})=={'action_id':'x','status':'sent'}
+
+
+@pytest.mark.parametrize('action,fields,ok',[
+    ('sit_out',{'table_commands':True,'away':False},True),
+    ('sit_in',{'table_commands':True,'away':True},True),
+    ('sit_in',{'table_commands':True,'away':False},False),
+    ('sit_out',{'table_commands':True,'away':True},False),
+    ('sit_out',{'table_commands':True,'sit_out_pending':True},False),
+    ('sit_out',{},False),
+])
+def test_sit_commands_need_a_new_worker_and_a_matching_seat_state(action,fields,ok):
+    m,db=service();manual_payload(db,turn_key=None,actions=[],**fields)
+    if ok:
+        assert m.action(1,db.request,{'action':action})['status']=='queued'
+        sql,args=db.writes[0]
+        assert args[8]==action and len(args[7])==64 and args[7]!='a'*64
+    else:
+        with pytest.raises(Error):m.action(1,db.request,{'action':action})
+        assert not db.writes
+
+
+def test_sit_command_waits_for_the_previous_one():
+    m,db=service();manual_payload(db,table_commands=True,away=True);db.pending_command={'ActionId':'p'}
+    with pytest.raises(Error,match='still being sent'):m.action(1,db.request,{'action':'sit_in'})

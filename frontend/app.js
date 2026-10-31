@@ -1,5 +1,5 @@
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
-import {ManualControls} from './manual-controls.js?v=20261031.manual4';
+import {ManualControls} from './manual-controls.js?v=20261031.manual5';
 import {installUpdates} from './updates-ui.js?v=20261029-status1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
 const $ = (s, root = document) => root.querySelector(s);
@@ -31,9 +31,18 @@ const gameHoleCardCount = (game,players=[]) => {
  const known=Math.max(0,...players.map(p=>p.cards?.length||0));
  return known||({PLO5:5,PLO4:4,NLH:2}[String(game||'').toUpperCase()]||2);
 };
-const pokerTableView = ({players,maxSeats,game,board,pot,street,dealerSeat,actingSeat,className=''}) => {
+// Seconds left for the acting seat, counted from the snapshot: EvenBet's move time first, then its time bank.
+const actingClock = (clock,captured) => {
+ if(!clock||!captured)return null;
+ const stamp=Date.parse(captured+(/Z$|[+-]\d\d:\d\d$/.test(captured)?'':'Z'));if(!stamp)return null;
+ const elapsed=Number(clock.age||0)+(Date.now()-stamp)/1000,move=Number(clock.move_seconds||0)-elapsed,bank=Number(clock.bank_seconds||0);
+ if(move>0)return {seat:clock.seat,text:`${Math.ceil(move)}s${bank>0?` · +${Math.round(bank)}s bank`:''}`,cls:move<=5?'low':''};
+ const left=Number(clock.move_seconds||0)>0?bank+move:bank-elapsed;
+ return left>0?{seat:clock.seat,text:`Time bank ${Math.ceil(left)}s`,cls:left<=5?'bank low':'bank'}:{seat:clock.seat,text:'Time is up',cls:'low'};
+};
+const pokerTableView = ({players,maxSeats,game,board,pot,street,dealerSeat,actingSeat,actingTimer=null,className=''}) => {
  const n=Math.max(maxSeats||0,players.length,1),backs=gameHoleCardCount(game,players);
- const seats=players.map(p=>{const toAct=actingSeat!==null&&actingSeat!==undefined&&Number(p.seat)===Number(actingSeat),cards=(p.cards||[]).map(c=>playingCard(c)).join(''),hidden=p.hidden?Array.from({length:backs},()=>playingCard('',true)).join(''):'';return `<div class="replay-seat ${p.hero?'hero':''} ${p.folded?'folded':''} ${toAct?'to-act':''}" data-seat="${p.seat}" style="${seatPosition(p.seat,n)}" ${toAct?'title="To act" aria-label="'+esc(p.name)+' — to act"':''}><div class="seat-cards">${cards}${hidden}</div>${p.actionText?`<em class="replay-action-bubble">${esc(p.actionText)}</em>`:''}<strong>${esc(p.name)}</strong><span>${Number(p.stack).toFixed(2)}</span>${Number(p.seat)===Number(dealerSeat)?'<i class="dealer-button">D</i>':''}</div>`}).join('');
+ const seats=players.map(p=>{const toAct=actingSeat!==null&&actingSeat!==undefined&&Number(p.seat)===Number(actingSeat),cards=(p.cards||[]).map(c=>playingCard(c)).join(''),hidden=p.hidden?Array.from({length:backs},()=>playingCard('',true)).join(''):'';return `<div class="replay-seat ${p.hero?'hero':''} ${p.folded?'folded':''} ${toAct?'to-act':''}" data-seat="${p.seat}" style="${seatPosition(p.seat,n)}" ${toAct?'title="To act" aria-label="'+esc(p.name)+' — to act"':''}><div class="seat-cards">${cards}${hidden}</div>${p.actionText?`<em class="replay-action-bubble">${esc(p.actionText)}</em>`:''}<strong>${esc(p.name)}</strong><span>${Number(p.stack).toFixed(2)}</span>${toAct&&actingTimer&&Number(actingTimer.seat)===Number(p.seat)?`<b class="seat-timer ${actingTimer.cls}" aria-live="off">${esc(actingTimer.text)}</b>`:''}${Number(p.seat)===Number(dealerSeat)?'<i class="dealer-button">D</i>':''}</div>`}).join('');
  const bets=players.filter(p=>Number(p.bet)>0).map(p=>`<div class="table-bet" data-seat="${p.seat}" style="${betPosition(p.seat,n)}">${Number(p.bet).toFixed(2)}</div>`).join('');
  return `<div class="poker-replay live-felt ${className}">${seats}${bets}<div class="replay-center"><div class="cards board">${(board||[]).map(c=>playingCard(c)).join('')}</div><strong>Pot ${Number(pot).toFixed(2)}</strong><span>${esc(street)}</span></div></div>`;
 };
@@ -259,7 +268,7 @@ pages.tables=async gen=>{
 async function liveTableWindow(requestId){
  document.title='Live table · Poker Control';$('#app').innerHTML='<div class="live-window"><header><img src="/mark.svg" alt=""><div><strong>Live table</strong><span id="live-status">Requesting table state…</span></div></header><main id="live-content"><div class="loading"><span class="spinner"></span>Waiting for the bot machine…</div></main><aside id="manual-controls"></aside></div>';
  const manual=new ManualControls($('#manual-controls'),requestId,siteApi);
- let polling=false;const poll=async()=>{if(polling)return;polling=true;try{const d=await siteApi(`tables/live/${encodeURIComponent(requestId)}`);$('#live-status').textContent=`${d.hero} · ${d.status} · ${d.captured?date(d.captured):'waiting for first snapshot'}`;if(!d.payload){$('#live-content').innerHTML=`<div class="sim-empty"><h2>Waiting for ${esc(d.hero)}’s machine</h2><p>The view will appear after its next telemetry cycle.</p></div>`;return;}manual.update(d);const p=d.payload,players=p.seats.map(s=>({seat:Number(s.seat),name:s.name,stack:s.stack,bet:s.bet,cards:s.cards||[],hero:s.hero,folded:s.sitting_out,hidden:!s.cards?.length&&s.in_game}));$('#live-content').innerHTML=`<div class="live-title"><h1>${esc(p.table_name)}</h1><p>Hand ${esc(p.hand_id)} · ${esc(p.game||'')} · ${esc(p.street)} · sequence ${d.sequence}</p></div>${pokerTableView({players,maxSeats:p.max_seats,game:p.game,board:p.board,pot:p.pot,street:p.street,dealerSeat:p.dealer,actingSeat:p.acting_seat})}`;}catch(e){$('#live-status').textContent=e.message;manual.disconnected();}finally{polling=false;}};await poll();state.poll=setInterval(poll,500);
+ let polling=false;const poll=async()=>{if(polling)return;polling=true;try{const d=await siteApi(`tables/live/${encodeURIComponent(requestId)}`);$('#live-status').textContent=`${d.hero} · ${d.status} · ${d.captured?date(d.captured):'waiting for first snapshot'}`;if(!d.payload){$('#live-content').innerHTML=`<div class="sim-empty"><h2>Waiting for ${esc(d.hero)}’s machine</h2><p>The view will appear after its next telemetry cycle.</p></div>`;return;}manual.update(d);const p=d.payload,players=p.seats.map(s=>({seat:Number(s.seat),name:s.name,stack:s.stack,bet:s.bet,cards:s.cards||[],hero:s.hero,folded:s.sitting_out,hidden:!s.cards?.length&&s.in_game}));$('#live-content').innerHTML=`<div class="live-title"><h1>${esc(p.table_name)}</h1><p>Hand ${esc(p.hand_id)} · ${esc(p.game||'')} · ${esc(p.street)} · sequence ${d.sequence}</p></div>${pokerTableView({players,maxSeats:p.max_seats,game:p.game,board:p.board,pot:p.pot,street:p.street,dealerSeat:p.dealer,actingSeat:p.acting_seat,actingTimer:actingClock(p.clock,d.captured)})}`;}catch(e){$('#live-status').textContent=e.message;manual.disconnected();}finally{polling=false;}};await poll();state.poll=setInterval(poll,500);
 }
 // Enhanced history browser replaces the initial compact implementation above.
 pages.historiesLegacy=async gen=>{

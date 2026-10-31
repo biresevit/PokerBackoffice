@@ -9,3 +9,12 @@
 
 /* Keep weekday names visible while panning the full-day chart. */
 .weekly-targets .day-label,.weekly-axis-row>span:first-child{position:sticky;left:0;z-index:4;background:#fff;align-self:stretch;box-shadow:10px 0 #fff}.weekly-targets .day-label{display:flex;align-items:center}
+
+/* Manual control feedback, sit-out commands and the acting player's clock. */
+.manual-note.manual-problem{padding:10px 12px;border-radius:8px;background:#fbeae6;border:1px solid #d9a092;color:#8e2f1f;font-weight:600}
+.manual-amount-error{flex-basis:100%;margin:0;min-height:1.2em;color:#a1321f;font-weight:600}
+.manual-amount-error:empty{min-height:0}
+.manual-table-commands{display:flex;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid #e3e7de}
+.live-felt .seat-timer{display:block;margin-top:2px;font:600 .8rem/1.2 system-ui,sans-serif;color:#ffd66b;font-variant-numeric:tabular-nums}
+.live-felt .seat-timer.bank{color:#ff9f7a}
+.live-felt .seat-timer.low{color:#ff6b5a}
