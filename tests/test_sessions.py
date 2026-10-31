@@ -98,7 +98,8 @@ def test_stop_without_tables_closes_the_session_directly():
 def test_stop_with_tables_ends_the_plan_and_lets_the_worker_close_it():
     db=Database(entries=True)
     assert service(db).stop(1,SESSION)=={'status':'leaving_tables'}
-    assert 'PlannedEndUtc=SYSUTCDATETIME()' in db.writes[0][0] and 'IsOpen' not in db.writes[0][0]
+    sql=db.writes[0][0]
+    assert 'THEN SYSUTCDATETIME()' in sql and "EndReason='stopped_by_operator'" in sql and 'IsOpen' not in sql
 
 
 def test_stop_rejects_an_ended_session():

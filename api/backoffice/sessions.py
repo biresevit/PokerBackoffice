@@ -110,7 +110,9 @@ class Sessions:
         if self.db.one('SELECT TOP(1) EntryId FROM scheduler.Entry WHERE SessionId=%s',session_id):
             # The PC worker owns sessions it has joined tables for and rewrites their open state, so
             # end it through the scheduler: tables are left normally and the worker closes the session.
-            self.db.execute('UPDATE scheduler.AccountSession SET PlannedEndUtc=SYSUTCDATETIME() WHERE SessionId=%s AND PlannedEndUtc>SYSUTCDATETIME()',session_id)
+            self.db.execute("""UPDATE scheduler.AccountSession SET EndReason='stopped_by_operator',
+                PlannedEndUtc=CASE WHEN PlannedEndUtc>SYSUTCDATETIME() THEN SYSUTCDATETIME() ELSE PlannedEndUtc END
+                WHERE SessionId=%s""",session_id)
             status='leaving_tables'
         else:
             self.db.execute("""UPDATE scheduler.AccountSession SET IsOpen=0,EndReason='stopped_by_operator',
