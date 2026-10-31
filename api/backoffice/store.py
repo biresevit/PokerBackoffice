@@ -572,7 +572,7 @@ class Store:
         bots=self.db.rows("""SELECT b.Username AS username FROM scheduler.AccountPolicy p
             JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""",site_id)
         return {"items":items,"total":total,"page":page,"page_size":size,"bots":bots,
-                "result_options":result_options,"from":from_day.isoformat(),"to":to_day.isoformat()}
+                "result_options":result_options,"from":query.get("from") or "","to":query.get("to") or ""}
 
     def save_machine(self, site_id, machine_id, body):
         self.site(site_id)
