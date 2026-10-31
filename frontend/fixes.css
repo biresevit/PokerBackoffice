@@ -55,3 +55,17 @@
 @media(max-width:560px){.manual-actions{grid-template-columns:1fr}}
 .machine-chart-slot summary{cursor:pointer;font-size:12px;font-weight:600;color:#5d6f57;padding:2px 0}
 .machine-chart-slot[open] summary{margin-bottom:10px}
+
+/* Updates: option cards instead of bare radio buttons. */
+.choice-group{border:0;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;max-width:900px}
+.choice-group legend{font-size:11px;font-weight:550;color:#697361;margin-bottom:6px;padding:0}
+.choice-group>.checkbox-line,.choice-group>.update-machine-list{grid-column:1/-1}
+.choice-card{position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.choice-card:hover{border-color:#a9bc98}
+.choice-card input[type=radio]{margin-top:3px;accent-color:var(--green)}
+.choice-card>span{display:grid;gap:3px}
+.choice-card strong{font-size:13px}
+.choice-card small{font-size:11px;color:var(--muted);line-height:1.5}
+.choice-card:has(input:checked){border-color:var(--green);box-shadow:0 0 0 2px #2c5e4326;background:#f6faf3}
+.choice-card .choice-input{margin-top:6px;max-width:240px}
+.pairing-form{margin-top:16px;align-items:end}

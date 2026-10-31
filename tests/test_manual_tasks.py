@@ -1,0 +1,96 @@
+"""Operator-created Join/Leave tasks go through the scheduler's own Entry/Command/Outbox journal."""
+from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
+
+from backoffice.manual_tasks import ManualTasks
+from backoffice.validation import Error
+
+
+class Database:
+    def __init__(self, tables=None, entries=None, ready=True, lease=None):
+        self.writes = []
+        self.session = dict(session_id='s1', id=4, username='emma', tier='high', max_tables=3, machine_id=10,
+                            machine='DESKTOP-567E93', epoch='EPOCH', machine_ready=ready)
+        self.entries = entries or []
+        self.lobby = tables if tables is not None else [
+            dict(id='t1', name='Full', game='NLH', big_blind=Decimal(2), seats=6, occupied=6),
+            dict(id='t2', name='Open', game='NLH', big_blind=Decimal(2), seats=6, occupied=3),
+            dict(id='t3', name='Micro', game='NLH', big_blind=Decimal('0.1'), seats=6, occupied=2)]
+        self.lease = lease
+
+    def rows(self, sql, *args):
+        if 'FROM scheduler.AccountSession s' in sql: return [dict(self.session)]
+        if 'FROM scheduler.Entry e LEFT JOIN' in sql: return [dict(e) for e in self.entries]
+        if 'FROM scheduler.StakeBand' in sql:
+            return [dict(Tier='high', MinBigBlind=Decimal(1), MaxBigBlind=Decimal(4), UpperInclusive=True),
+                    dict(Tier='low', MinBigBlind=Decimal('.05'), MaxBigBlind=Decimal('.5'), UpperInclusive=False)]
+        if 'FROM scheduler.LobbyTable' in sql: return [dict(t) for t in self.lobby]
+        raise AssertionError(sql)
+
+    def one(self, sql, *args):
+        if 'WITH(UPDLOCK,HOLDLOCK)' in sql: return None
+        if 'COUNT(*) AS n' in sql: return {'n': 0}
+        if 'ConfigVersion' in sql: return {'ConfigVersion': 7}
+        if 'FROM scheduler.AccountLease' in sql: return self.lease
+        raise AssertionError(sql)
+
+    def execute(self, sql, *args): self.writes.append((sql, args))
+
+    def written(self, table): return [args for sql, args in self.writes if f'INSERT scheduler.{table}' in sql]
+
+
+def tasks(db, role='operator'):
+    store = SimpleNamespace(db=db, ctx=SimpleNamespace(role=role, customer_id=1, subject='me'),
+                            site=lambda s: {'timezone': 'UTC'}, audit=lambda *a: None)
+    return ManualTasks(store)
+
+
+def test_join_goes_to_the_sessions_pc_at_a_free_table_of_the_bots_stakes():
+    db = Database()
+    result = tasks(db).create(1, {'kind': 'join', 'account_id': '4', 'table_id': 'any'})
+    assert result['table'] == 't2' and result['machine'] == 'DESKTOP-567E93'
+    entry, = db.written('Entry')
+    assert entry[2:6] == (4, 10, 'EPOCH', 't2') and entry[-1] == 's1'
+    command, = db.written('Command')
+    assert command[3:5] == (10, 'EPOCH') and command[5] == 7
+    assert len(db.written('Outbox')) == 1 and len(db.written('AccountLease')) == 1
+
+
+def test_join_options_offer_only_free_tables_at_the_bots_stakes():
+    session, = tasks(Database()).options(1)['sessions']
+    assert session['join_tables'] == ['t2'] and 'epoch' not in session
+
+
+@pytest.mark.parametrize('body,db', [
+    ({'kind': 'join', 'account_id': 4, 'table_id': 't1'}, Database()),   # full
+    ({'kind': 'join', 'account_id': 4, 'table_id': 't3'}, Database()),   # other stakes
+    ({'kind': 'join', 'account_id': 4}, Database(ready=False)),          # PC offline
+    ({'kind': 'join', 'account_id': 4}, Database(lease={'MachineId': 16, 'WorkerEpoch': 'X', 'RequiresReconciliation': False})),
+    ({'kind': 'join', 'account_id': 4}, Database(entries=[dict(id=f'e{n}', account_id=4, table_id=f'x{n}', status='seated',
+                                                                 table_name='x', big_blind=2, leaving=False) for n in range(3)])),
+    ({'kind': 'leave', 'account_id': 4}, Database()),                    # nothing to leave
+    ({'kind': 'scan', 'account_id': 4}, Database()),
+])
+def test_invalid_manual_tasks_write_nothing(body, db):
+    with pytest.raises(Error):
+        tasks(db).create(1, body)
+    assert not db.writes
+
+
+def test_leave_targets_a_seated_table_and_skips_one_already_leaving():
+    entries = [dict(id='e1', account_id=4, table_id='t2', status='seated', table_name='Open', big_blind=2, leaving=True),
+               dict(id='e2', account_id=4, table_id='t4', status='sitting_out', table_name='Other', big_blind=2, leaving=False)]
+    db = Database(entries=entries)
+    result = tasks(db).create(1, {'kind': 'leave', 'account_id': 4})
+    assert result['table'] == 't4'
+    command, = db.written('Command')
+    assert command[2] == 'e2' and not db.written('Entry')
+
+
+def test_viewers_cannot_create_tasks():
+    db = Database()
+    with pytest.raises(Error) as error:
+        tasks(db, 'viewer').create(1, {'kind': 'join', 'account_id': 4})
+    assert error.value.status == 403 and not db.writes

@@ -139,7 +139,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             if section == "updates":
                 from .updates import Updates
                 updates=Updates(store)
-                if method=='GET' and tail is None:return response(updates.list(sid))
+                if method=='GET' and tail is None:return response(updates.list(sid,request.query))
                 if method=='POST' and tail is None:return response(updates.create(sid,body),202)
                 if method=='POST' and tail in ('pairing/lookup','pairing/approve'):
                     from .pairing import lookup,approve
@@ -205,6 +205,14 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 if method=="POST" and stop:
                     return response(sessions.stop(sid,stop[1]))
                 raise Error(404,'Session endpoint not found')
+            if section == "tasks" and (tail is not None or method == "POST"):
+                from .manual_tasks import ManualTasks
+                tasks=ManualTasks(store)
+                if method=="GET" and tail=="options":
+                    return response(tasks.options(sid))
+                if method=="POST" and tail is None:
+                    return response(tasks.create(sid,body),201)
+                raise Error(404,'Task endpoint not found')
             if section in ("tasks","sessions") and method == "GET" and tail is None:
                 return response(getattr(store,section)(sid,request.query))
             if section == "machines" and method == "GET" and tail:

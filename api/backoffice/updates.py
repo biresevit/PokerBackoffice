@@ -21,8 +21,14 @@ def operator(store,site_id):
 class Updates:
     def __init__(self,store):self.store=store;self.db=store.db;self.ctx=store.ctx
 
-    def list(self,site_id):
-        self.store.site(site_id)
+    def list(self,site_id,query=None):
+        site=self.store.site(site_id)
+        # Past rollouts: everything created since From, or the 30 most recent.
+        since=None
+        if (query or {}).get('from'):
+            from zoneinfo import ZoneInfo
+            from .store import local_range
+            since=local_range({'from':query['from']},ZoneInfo(site['timezone']))[0]
         releases=self.db.rows("SELECT ReleaseId AS id,Label AS label,PDecisionVersion AS pdecision_version,PokerControllerVersion AS poker_controller_version,PublishedUtc AS published,BootstrapUrl AS bootstrap_url FROM scheduler.UpdateRelease WHERE Enabled=1 ORDER BY PublishedUtc DESC")
         machines=self.db.rows("""SELECT a.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,
             g.LastHeartbeatUtc AS agent_heartbeat,g.CurrentReleaseId AS installed_release,v.Label AS installed_label,g.AgentVersion AS agent_version,g.AppsHealthy AS apps_healthy,g.Stage AS stage,
@@ -34,9 +40,10 @@ class Updates:
             WHERE a.SiteId=%s AND m.CustomerId=%s AND m.IsActive=1 ORDER BY a.MachineId""",site_id,self.ctx.customer_id)
         now=datetime.now(timezone.utc).replace(tzinfo=None)
         for machine in machines:machine['agent_online']=bool(machine['agent_heartbeat'] and machine['agent_heartbeat']>=now-timedelta(seconds=60))
-        rollouts=self.db.rows("""SELECT TOP(30) r.RolloutId AS id,r.Status AS status,r.NotBeforeUtc AS scheduled,r.CreatedUtc AS created,r.Immediate AS immediate,v.Label AS release_label
+        rollouts=self.db.rows("""SELECT TOP(%s) r.RolloutId AS id,r.Status AS status,r.NotBeforeUtc AS scheduled,r.CreatedUtc AS created,r.Immediate AS immediate,v.Label AS release_label
             FROM scheduler.UpdateRollout r JOIN scheduler.UpdateRelease v ON v.ReleaseId=r.ReleaseId
-            WHERE r.SiteId=%s AND r.CustomerId=%s ORDER BY r.CreatedUtc DESC""",site_id,self.ctx.customer_id)
+            WHERE r.SiteId=%s AND r.CustomerId=%s AND (%s IS NULL OR r.CreatedUtc>=%s) ORDER BY r.CreatedUtc DESC""",
+            500 if since else 30,site_id,self.ctx.customer_id,since,since)
         tasks=self.db.rows("""SELECT t.TaskId AS id,t.RolloutId AS rollout_id,t.MachineId AS machine_id,
             COALESCE(x.HostName,m.Description) AS machine,t.Position AS position,t.Status AS status,t.Detail AS detail,
             t.OriginalEntries AS original_entries,t.RecoveryTarget AS recovery_target,t.StartedUtc AS started,t.CompletedUtc AS completed,t.Staged AS staged
