@@ -147,4 +147,6 @@ def account_settings(body):
         "max_tables": integer(body.get("max_tables"), 1, 100, "maximum tables"),
         "post_bb_chance": number(body.get("post_bb_chance"), 0, 1, "post BB chance"),
         "run_it_twice_chance": number(body.get("run_it_twice_chance"), 0, 1, "run it twice chance"),
+        "rebuy_ring_chance": number(body.get("rebuy_ring_chance"), 0, 1, "ring rebuy chance"),
+        "rebuy_tournament_chance": number(body.get("rebuy_tournament_chance"), 0, 1, "tournament rebuy chance"),
         "buy_in_weights": normalized}

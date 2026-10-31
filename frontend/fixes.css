@@ -18,3 +18,7 @@
 .live-felt .seat-timer{display:block;margin-top:2px;font:600 .8rem/1.2 system-ui,sans-serif;color:#ffd66b;font-variant-numeric:tabular-nums}
 .live-felt .seat-timer.bank{color:#ff9f7a}
 .live-felt .seat-timer.low{color:#ff6b5a}
+.hand-result{display:inline-flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;margin:2px auto 10px;padding:7px 14px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12px}
+.hand-result strong{color:var(--ink)}
+.hand-result.current{background:#fff6d6;border-color:#f0d27a;color:#4b3a0b;font-weight:600}
+.live-felt .replay-seat.winner{outline:3px solid #f4cf63;box-shadow:0 0 18px #f4cf6399}

@@ -199,3 +199,15 @@ def test_entry_chart_simultaneous_join_close_and_range_start():
     schedule={"enabled":False,"timezone":"UTC","windows":[]}
     points=entry_history_points(schedule,[(start-timedelta(minutes=1),start),(start,switch),(switch,None)],start,start+timedelta(minutes=1),1)
     assert all(p["running"]==1 and p["scheduled"]==0 for p in points)
+
+
+def test_account_rebuy_chances_are_required_probabilities():
+    from backoffice.validation import account_settings
+    body = {"strategy": 5, "stake": "high", "frequency": "low", "max_minutes": 240, "max_tables": 4,
+            "post_bb_chance": .1, "run_it_twice_chance": .9, "rebuy_ring_chance": .85,
+            "rebuy_tournament_chance": .4, "buy_in_weights": {"100": 100}}
+    values = account_settings(body)
+    assert (float(values["rebuy_ring_chance"]), float(values["rebuy_tournament_chance"])) == (.85, .4)
+    for field, value in (("rebuy_ring_chance", 1.2), ("rebuy_tournament_chance", None)):
+        with pytest.raises(Error):
+            account_settings({**body, field: value})

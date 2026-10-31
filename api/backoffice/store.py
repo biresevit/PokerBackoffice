@@ -155,6 +155,7 @@ class Store:
             p.SessionMinMinutes AS session_min_minutes,p.SessionMaxMinutes AS session_max_minutes,
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
+            p.RebuyRingChance AS rebuy_ring_chance,p.RebuyTournamentChance AS rebuy_tournament_chance,
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
             COALESCE(d.SessionSeconds,0) AS played_seconds,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
@@ -193,10 +194,12 @@ class Store:
         self.db.execute("UPDATE dbo.BotAccount SET Strategy=%s,UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s",
                         values["strategy"], account_id)
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
-            MaxPlaytimeMinutes=%s,MaxTables=%s,PostBbChance=%s,RunItTwiceChance=%s,BuyInPolicyJson=%s,
+            MaxPlaytimeMinutes=%s,MaxTables=%s,PostBbChance=%s,RunItTwiceChance=%s,
+            RebuyRingChance=%s,RebuyTournamentChance=%s,BuyInPolicyJson=%s,
             UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s""",
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
-            values["post_bb_chance"], values["run_it_twice_chance"], json.dumps(values["buy_in_weights"]), site_id, account_id)
+            values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
+            values["rebuy_tournament_chance"], json.dumps(values["buy_in_weights"]), site_id, account_id)
         if enabled is not None:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
         if durations:
