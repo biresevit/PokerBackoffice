@@ -184,6 +184,9 @@ def agent_request(db,machine_id,headers,body,action):
             db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=SYSUTCDATETIME(),EndReason='forced_update' WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
             db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
             db.execute('DELETE scheduler.AccountLease WHERE SiteId=%s AND MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',task['SiteId'],machine_id)
+            # A killed worker never marks itself stopped; its fresh heartbeat would make the new worker
+            # refuse to start ('Machine has a live worker') for 90 seconds and fail the update.
+            db.execute('UPDATE scheduler.MachineAssignment SET IsReady=0 WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='stopping',UpdatedUtc=%s,Detail='Applications were force-stopped immediately; open sessions were cut off, not confirmed absent from the table.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='installing' and status in ('stopping','installing'):
             if task['RolloutStatus']=='paused':raise Error(409,'Rollout is paused')
