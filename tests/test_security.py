@@ -211,3 +211,18 @@ def test_account_rebuy_chances_are_required_probabilities():
     for field, value in (("rebuy_ring_chance", 1.2), ("rebuy_tournament_chance", None)):
         with pytest.raises(Error):
             account_settings({**body, field: value})
+
+
+def test_task_and_session_ranges_use_site_wall_clock():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from backoffice.store import local_range
+    zone, now = ZoneInfo("Europe/Budapest"), datetime(2026, 11, 1, 9, 30, tzinfo=timezone.utc)
+    start, stop = local_range({}, zone, now)
+    assert start == datetime(2026, 10, 31, 23, 0) and stop > now.replace(tzinfo=None)  # 00:00 CET; open-ended To
+    start, stop = local_range({"from": "2026-11-01T08:00", "to": "2026-11-01T10:15"}, zone, now)
+    assert (start, stop) == (datetime(2026, 11, 1, 7, 0), datetime(2026, 11, 1, 9, 16))
+    assert local_range({"from": "2026-10-30", "to": "2026-10-31"}, zone, now)[1] == datetime(2026, 10, 31, 23, 0)
+    for bad in ({"from": "yesterday"}, {"from": "2026-11-01T10:00", "to": "2026-11-01T09:00"}):
+        with pytest.raises(Error):
+            local_range(bad, zone, now)

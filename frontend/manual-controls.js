@@ -9,8 +9,26 @@ export const amountProblem=(text,o,wager)=>{
  return '';
 };
 
+// Sizing presets as on the table: multiples of the big blind (or of the bet faced) before the flop, pot fractions after.
+const PREFLOP=[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB'],['max','Max']],POSTFLOP=[[1/3,'33% Pot'],[1/2,'50% Pot'],[3/4,'75% Pot'],[1,'Pot']];
+export const presetTarget=(value,o,payload)=>{
+ if(value==='max')return o.max_target_minor;
+ const bets=(payload?.seats||[]).map(s=>Math.round(Number(s.bet||0)*100));
+ if(payload?.street==='Preflop'){const bb=Math.round(Number(payload.big_blind||0)*100)||o.step_minor;return Math.round(value*Math.max(bb,...bets));}
+ return Math.round(o.hero_bet_minor+o.call_minor+value*(o.pot_minor+bets.reduce((a,b)=>a+b,0)+o.call_minor));
+};
+const kbd=k=>`<kbd>${k}</kbd>`;
+
 export class ManualControls {
- constructor(root,requestId,api){this.root=root;this.requestId=requestId;this.api=api;this.busy=false;this.amount='';this.key=null;this.data=null;this.error='';}
+ constructor(root,requestId,api){this.root=root;this.requestId=requestId;this.api=api;this.busy=false;this.amount='';this.key=null;this.data=null;this.error='';this.keys={};
+  // Keyboard shortcuts work anywhere in the live window except while typing in another field.
+  document.addEventListener('keydown',e=>{
+   if(e.ctrlKey||e.altKey||e.metaKey||e.repeat)return;
+   const typing=e.target.closest?.('input:not([type=checkbox]):not([type=range]),textarea,select'),amount=e.target.name==='manual-amount';
+   if(typing&&!amount)return;
+   const key=amount?({ArrowUp:'up',ArrowDown:'down'})[e.key]:({ArrowUp:'up',ArrowDown:'down'})[e.key]||e.key.toLowerCase();
+   const run=key&&this.keys[key];if(run){e.preventDefault();run();}
+  });}
  update(data){this.data=data;const key=data.payload?.manual?.turn_key;if(key!==this.key){this.key=key;this.amount='';this.error='';}this.draw();}
  disconnected(){this.error='Connection interrupted. Actions are disabled until fresh table state arrives.';this.data=null;this.draw();}
  async post(kind,body){this.busy=true;this.error='';this.draw();try{return await this.api(`tables/live/${encodeURIComponent(this.requestId)}/${kind}`,'POST',body);}catch(e){this.error=e.message;return null;}finally{this.busy=false;this.draw();}}
@@ -33,20 +51,29 @@ export class ManualControls {
   const sizing=wager&&allowed?amountProblem(this.amount,o,wager):'';
   const tableControls=on&&ack&&fresh&&o.table_commands&&!this.busy&&!commandBusy&&!readonly;
   const sit=tableControls?(o.away?'<button class="button primary" data-command="sit_in">I’m back</button>':!o.sit_out_pending?'<button class="button" data-command="sit_out">Sit out next hand</button>':''):'';
-  const focused=this.root.querySelector('input[name="manual-amount"]')===document.activeElement;
+  const active=document.activeElement,focused=!!active&&this.root.contains(active)&&['manual-amount','manual-slider'].includes(active.name);
   const renderKey=`${on}:${ack}:${allowed}:${o.turn_key}:${pending}:${sit}`;
-  // Polls must not replace a focused amount field or discard an unfinished edit.
-  if(focused&&!this.busy&&this.renderKey===renderKey){this.note(problem||note,!!problem);return;}
+  // Polls must not replace a focused amount field or slider, or discard an unfinished edit.
+  if(focused&&!this.busy&&this.renderKey===renderKey){this.note(allowed&&!problem?'':problem||note,!!problem);return;}
   this.renderKey=renderKey;
-  this.root.innerHTML=`<section class="manual-control"><label class="manual-switch"><input type="checkbox" role="switch" aria-label="Take manual control of hero at this table" ${on?'checked':''} ${this.busy||readonly||!supported||m.other_window||!fresh?'disabled':''}><strong>Manual control of ${escape(d?.hero||'hero')}</strong></label><p class="manual-note" role="status"></p>${on?'<p class="sub">Automatic decisions are paused for this hero at this table. Once you act on a hand, finish it here: turning this off or closing this window returns control to automatic play from the next hand.</p>':''}${allowed?`<div class="manual-actions">${actions.includes('fold')?'<button class="button manual-fold" data-action="fold">Fold</button>':''}${actions.includes('check')?'<button class="button" data-action="check">Check</button>':actions.includes('call')?`<button class="button" data-action="call">Call ${chips(o.call_minor)}</button>`:''}${wager?`<button class="button primary" data-action="${wager}" ${sizing?'disabled':''}>${wager==='bet'?'Bet':'Raise to'} ${escape(this.amount)}</button>`:''}</div>${wager?`<div class="manual-sizing"><label>${wager==='bet'?'Bet total':'Raise to total'}<span class="manual-amount-row"><button class="button" data-adjust="-1" aria-label="Decrease bet">−</button><input name="manual-amount" type="text" inputmode="decimal" autocomplete="off" value="${escape(this.amount)}" aria-describedby="manual-amount-error"><button class="button" data-adjust="1" aria-label="Increase bet">+</button></span></label><span class="sub">Min ${chips(o.min_target_minor)} · Max ${chips(o.max_target_minor)}</span><p class="manual-amount-error" id="manual-amount-error" role="alert">${escape(sizing)}</p><div class="manual-shortcuts">${[[1/3,'1/3'],[2/3,'2/3'],[3/4,'3/4'],[1,'Pot size']].map(([f,label])=>`<button class="button small" data-fraction="${f}">${label}</button>`).join('')}</div></div>`:''}`:''}${sit?`<div class="manual-table-commands">${sit}</div>`:''}</section>`;
-  this.note(problem||note,!!problem);
+  const hero=escape(d?.hero||'hero'),wagerLabel=wager==='bet'?'Bet':'Raise',presets=d?.payload?.street==='Preflop'?PREFLOP:POSTFLOP;
+  const switchTitle=on?`Manual control of ${hero} is on. Once you act on a hand, finish it here; turning this off or closing the window returns to automatic play from the next hand.`:`Take manual control of ${hero} at this table`;
+  const sizingHtml=wager?`<div class="manual-sizing"><div class="manual-presets">${presets.map(([value,label],i)=>`<button class="button" data-preset="${value}">${label}${kbd(i+1)}</button>`).join('')}</div><div class="manual-amount"><input name="manual-amount" type="text" inputmode="decimal" autocomplete="off" value="${escape(this.amount)}" aria-label="${wager==='bet'?'Bet':'Raise to'} total" aria-describedby="manual-amount-error"><input name="manual-slider" type="range" min="${o.min_target_minor}" max="${o.max_target_minor}" step="1" value="${parseMinor(this.amount)??o.min_target_minor}" aria-label="${wager==='bet'?'Bet':'Raise to'} amount"></div></div><p class="manual-amount-error" id="manual-amount-error" role="alert">${escape(sizing)}</p>`:'';
+  const actionsHtml=`<div class="manual-actions">${actions.includes('fold')?`<button class="manual-act fold" data-action="fold">Fold${kbd('F')}</button>`:''}${actions.includes('check')?`<button class="manual-act call" data-action="check">Check${kbd('C')}</button>`:actions.includes('call')?`<button class="manual-act call" data-action="call">Call ${chips(o.call_minor)}${kbd('C')}</button>`:''}${wager?`<button class="manual-act raise" data-action="${wager}" ${sizing?'disabled':''}><span>${wagerLabel} ${escape(this.amount)}</span>${kbd('R')}</button>`:''}</div>`;
+  this.root.innerHTML=`<section class="manual-control ${on?'is-on':''}"><div class="manual-head"><label class="manual-switch" title="${escape(switchTitle)}"><input type="checkbox" role="switch" aria-label="${on?`Manual control of ${hero} is on`:`Take manual control of ${hero}`}" ${on?'checked':''} ${this.busy||readonly||!supported||m.other_window||!fresh?'disabled':''}><span class="manual-track"><span></span></span>${on?'':`<strong>Manual control of ${hero}</strong>`}</label><p class="manual-note" role="status"></p></div>${allowed?sizingHtml+actionsHtml:''}${sit?`<div class="manual-table-commands">${sit}</div>`:''}</section>`;
+  this.note(allowed&&!problem?'':problem||note,!!problem);
   this.root.querySelector('[role="switch"]').onchange=async e=>{const enabled=e.target.checked;const r=await this.post('manual',{enabled});if(r&&this.data){this.data.manual={...this.data.manual,enabled};this.draw();}};
-  const input=this.root.querySelector('[name="manual-amount"]'),button=wager&&this.root.querySelector(`[data-action="${wager}"]`),hint=this.root.querySelector('.manual-amount-error');
-  const show=()=>{const issue=amountProblem(this.amount,o,wager);if(button){button.textContent=`${wager==='bet'?'Bet':'Raise to'} ${this.amount}`;button.disabled=!!issue;}if(hint)hint.textContent=issue;};
+  const input=this.root.querySelector('[name="manual-amount"]'),slider=this.root.querySelector('[name="manual-slider"]'),button=wager&&this.root.querySelector(`[data-action="${wager}"]`),hint=this.root.querySelector('.manual-amount-error');
+  const show=()=>{const issue=amountProblem(this.amount,o,wager);if(button){button.querySelector('span').textContent=`${wagerLabel} ${this.amount}`;button.disabled=!!issue;}if(hint)hint.textContent=issue;const v=parseMinor(this.amount);if(slider&&v!==null&&document.activeElement!==slider)slider.value=v;};
   const set=v=>{this.amount=chips(Math.max(o.min_target_minor,Math.min(o.max_target_minor,Math.round(v))));if(input)input.value=this.amount;show();};
-  if(input){input.oninput=()=>{this.amount=input.value;show();};input.onblur=()=>{const v=parseMinor(this.amount);if(v!==null)set(v);};input.onkeydown=e=>{if(e.key==='Enter'&&button&&!button.disabled)button.click();};}
-  this.root.querySelectorAll('[data-adjust]').forEach(b=>b.onclick=()=>set((parseMinor(this.amount)??o.min_target_minor)+Number(b.dataset.adjust)*o.step_minor));
-  this.root.querySelectorAll('[data-fraction]').forEach(b=>b.onclick=()=>set(o.hero_bet_minor+o.call_minor+Number(b.dataset.fraction)*(o.pot_minor+(d.payload.seats||[]).reduce((sum,s)=>sum+Math.round(Number(s.bet||0)*100),0)+o.call_minor)));
+  if(input){input.oninput=()=>{this.amount=input.value;show();};input.onblur=()=>{const v=parseMinor(this.amount);if(v!==null)set(v);};input.onkeydown=e=>{if(e.key==='Enter'&&button&&!button.disabled){e.preventDefault();button.click();}};}
+  if(slider)slider.oninput=()=>set(Number(slider.value));
+  const presetButtons=[...this.root.querySelectorAll('[data-preset]')];
+  presetButtons.forEach(b=>b.onclick=()=>set(presetTarget(b.dataset.preset==='max'?'max':Number(b.dataset.preset),o,d.payload)));
+  const click=sel=>()=>{const b=this.root.querySelector(sel);if(b&&!b.disabled)b.click();};
+  const step=n=>()=>set((parseMinor(this.amount)??o.min_target_minor)+n*o.step_minor);
+  this.keys=allowed?{f:click('[data-action="fold"]'),c:click('[data-action="check"],[data-action="call"]'),r:click('.manual-act.raise'),b:click('.manual-act.raise'),
+   up:wager?step(1):null,down:wager?step(-1):null,...Object.fromEntries(presetButtons.map((b,i)=>[String(i+1),()=>b.click()]))}:{};
   this.root.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{
    const action=b.dataset.action;let amount=this.amount;
    if(action===wager){const issue=amountProblem(amount,o,wager);if(issue){this.error=issue;this.draw();return;}amount=chips(parseMinor(amount));}

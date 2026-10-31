@@ -68,6 +68,30 @@ def task_result_description(row):
     return row.get("result_text") or descriptions.get(code) or (str(code).replace("_"," ").capitalize() if code else "")
 
 
+def local_range(query, zone, now=None):
+    """UTC bounds for a From/To filter in the site's wall-clock time.
+
+    From defaults to 00:00 today. Without To the range is open-ended, so a page refreshing
+    "until now" keeps showing new and scheduled rows. Dates mean whole days; date-times are
+    minutes, with To inclusive."""
+    now = now or datetime.now(timezone.utc)
+    def parse(value, end):
+        value = str(value).strip()
+        try:
+            if len(value) == 10:
+                return datetime.strptime(value, "%Y-%m-%d") + timedelta(days=1 if end else 0)
+            return datetime.strptime(value[:16], "%Y-%m-%dT%H:%M") + timedelta(minutes=1 if end else 0)
+        except ValueError:
+            raise Error(400, "From and To must be valid dates")
+    utc = lambda local: local.replace(tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
+    today = now.astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    start = utc(parse(query["from"], False)) if query.get("from") else utc(today)
+    stop = utc(parse(query["to"], True)) if query.get("to") else now.replace(tzinfo=None) + timedelta(days=366)
+    if stop <= start or stop - start > timedelta(days=367 + 366):
+        raise Error(400, "To must be after From, within about a year")
+    return start, stop
+
+
 def live_table_sort_key(row):
     """Ring formats first; tournaments follow, retaining occupancy priority per group."""
     table_type = str(row.get("table_type") or "RING").upper()
@@ -483,6 +507,7 @@ class Store:
         page=integer(query.get("page",1),1,100000,"page")
         size=integer(query.get("page_size",50),10,100,"page size")
         if size not in (10,20,50,100):raise Error(400,"Page size must be 10, 20, 50 or 100")
+        start,stop=local_range(query,ZoneInfo(self.site(site_id)["timezone"]))
         cte="""WITH TaskRows AS(
             SELECT c.CommandId AS TaskId,c.SiteId,c.MachineId,c.Kind,c.Status,c.CreatedUtc,c.UpdatedUtc,
                 c.NotBeforeUtc,c.AttemptCount,c.ResultCode,c.ResultText,e.TableId,b.Username AS Bot
@@ -495,8 +520,9 @@ class Store:
             FROM scheduler.MachineUpdateTask t JOIN scheduler.UpdateRollout r ON r.RolloutId=t.RolloutId)
             """
         where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR COALESCE(x.HostName,m.Description,'') LIKE %s)
-            AND (%s='' OR c.Bot LIKE %s) AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)"""
-        args=(site_id,machine,machine,'%'+machine+'%',bot,'%'+bot+'%',kind,kind,status,status)
+            AND (%s='' OR c.Bot LIKE %s) AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)
+            AND c.CreatedUtc>=%s AND c.CreatedUtc<%s"""
+        args=(site_id,machine,machine,'%'+machine+'%',bot,'%'+bot+'%',kind,kind,status,status,start,stop)
         joins=" FROM TaskRows c JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId "
         total=self.db.one(cte+'SELECT COUNT(*) AS n'+joins+'WHERE '+where,*args)['n']
         items=self.db.rows(cte+"""SELECT c.TaskId AS id,c.Kind AS kind,c.Status AS status,c.CreatedUtc AS created,
@@ -510,14 +536,7 @@ class Store:
 
     def sessions(self,site_id,query):
         site=self.site(site_id)
-        zone=ZoneInfo(site["timezone"]);today=datetime.now(timezone.utc).astimezone(zone).date()
-        try:
-            from_day=datetime.strptime(query.get("from") or (today-timedelta(days=7)).isoformat(),"%Y-%m-%d").date()
-            to_day=datetime.strptime(query.get("to") or today.isoformat(),"%Y-%m-%d").date()
-        except ValueError: raise Error(400,"From and To must be valid dates")
-        if to_day<from_day or (to_day-from_day).days>366: raise Error(400,"Session date range must be between 1 and 367 days")
-        start=datetime.combine(from_day,datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
-        stop=datetime.combine(to_day+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        start,stop=local_range(query,ZoneInfo(site["timezone"]))
         bot=str(query.get("bot") or "").strip()[:100]
         result=str(query.get("result") or "all").strip()
         if len(result)>80:
