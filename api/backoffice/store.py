@@ -180,6 +180,8 @@ class Store:
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
             p.RebuyRingChance AS rebuy_ring_chance,p.RebuyTournamentChance AS rebuy_tournament_chance,
+            p.BreakAfterMinSeconds/60 AS break_every_min_minutes,p.BreakAfterMaxSeconds/60 AS break_every_max_minutes,
+            p.BreakMinSeconds AS break_min_seconds,p.BreakMaxSeconds AS break_max_seconds,
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
             COALESCE(d.SessionSeconds,0) AS played_seconds,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
@@ -215,6 +217,13 @@ class Store:
             maximum = integer(body.get("session_max_minutes"), minimum, 1440, "session maximum")
             cooldown = integer(body.get("session_cooldown_minutes"), 0, 1440, "session cooldown")
             durations = (minimum, maximum, cooldown)
+        breaks = None
+        if "break_every_min_minutes" in body:
+            every_min = integer(body.get("break_every_min_minutes"), 1, 1440, "minimum minutes between breaks")
+            every_max = integer(body.get("break_every_max_minutes"), every_min, 1440, "maximum minutes between breaks")
+            length_min = integer(body.get("break_min_seconds"), 10, 300, "shortest break")
+            length_max = integer(body.get("break_max_seconds"), length_min, 300, "longest break")
+            breaks = (every_min * 60, every_max * 60, length_min, length_max)
         self.db.execute("UPDATE dbo.BotAccount SET Strategy=%s,UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s",
                         values["strategy"], account_id)
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
@@ -228,6 +237,8 @@ class Store:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
         if durations:
             self.db.execute("UPDATE scheduler.AccountPolicy SET SessionMinMinutes=%s,SessionMaxMinutes=%s,SessionCooldownMinutes=%s WHERE SiteId=%s AND BotAccountId=%s", *durations, site_id, account_id)
+        if breaks:
+            self.db.execute("UPDATE scheduler.AccountPolicy SET BreakAfterMinSeconds=%s,BreakAfterMaxSeconds=%s,BreakMinSeconds=%s,BreakMaxSeconds=%s WHERE SiteId=%s AND BotAccountId=%s", *breaks, site_id, account_id)
         self.bump(site_id)
         self.audit("account.update", account_id, values)
         return {"version": site["version"] + 1}
