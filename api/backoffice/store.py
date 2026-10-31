@@ -346,10 +346,17 @@ class Store:
             ORDER BY t.BigBlind,t.TableName""", site_id)
         for row in rows:
             row["players"] = self.db.rows("""SELECT s.SeatIndex AS seat,s.Username AS username,s.Stack AS stack,
-                s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,COALESCE(s.BotAccountId,(SELECT TOP(1) b.BotAccountId FROM dbo.BotAccount b JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId WHERE p.SiteId=s.SiteId AND b.Username=s.Username)) AS account_id,
-                (SELECT TOP(1) e.MachineId FROM scheduler.Entry e WHERE e.SiteId=s.SiteId AND e.TableId=s.TableId
-                 AND e.BotAccountId=s.BotAccountId AND e.IsOpen=1) AS machine_id
-                FROM scheduler.TableSeat s WHERE s.SiteId=%s AND s.TableId=%s ORDER BY s.SeatIndex""", site_id, row["id"])
+                s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,ra.AccountId AS account_id,
+                em.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
+                FROM scheduler.TableSeat s
+                CROSS APPLY (SELECT COALESCE(s.BotAccountId,(SELECT TOP(1) b.BotAccountId FROM dbo.BotAccount b
+                    JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId
+                    WHERE p.SiteId=s.SiteId AND b.Username=s.Username)) AS AccountId) ra
+                OUTER APPLY (SELECT TOP(1) e.MachineId FROM scheduler.Entry e WHERE e.SiteId=s.SiteId AND e.TableId=s.TableId
+                    AND e.BotAccountId=ra.AccountId AND e.IsOpen=1) em
+                LEFT JOIN dbo.CustomerMachine m ON m.MachineId=em.MachineId
+                LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=em.MachineId
+                WHERE s.SiteId=%s AND s.TableId=%s ORDER BY s.SeatIndex""", site_id, row["id"])
             # An open scheduler entry may still be joining, draining, or awaiting
             # restart reconciliation. The lobby badge describes seats, so derive
             # it only from bot identities present in this exact seat snapshot.
