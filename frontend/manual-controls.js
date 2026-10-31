@@ -9,7 +9,8 @@ export class ManualControls {
  draw(){
   const d=this.data,m=d?.manual||{},o=d?.payload?.manual||{},supported=!!o.supported;
   const raw=d?.captured,stamp=raw?Date.parse(raw+( /Z$|[+-]\d\d:\d\d$/.test(raw)?'':'Z')):0,fresh=stamp&&Date.now()-stamp<5000;
-  const on=!!m.enabled,ack=on&&o.enabled&&o.request_id===this.requestId,latest=m.last_action;
+  // The bot reports the request id as SQL Server returns it (upper case); the page holds it lower case.
+  const on=!!m.enabled,ack=on&&o.enabled&&String(o.request_id||'').toLowerCase()===String(this.requestId).toLowerCase(),latest=m.last_action;
   const pending=o.submitted||(latest&&latest.turn_key===o.turn_key&&['queued','submitted','sent','uncertain','expired','failed'].includes(latest.status));
   const allowed=ack&&fresh&&o.turn_key&&!pending&&!this.busy;
   let note=!supported?'Manual control requires the latest PokerController release.':!fresh?'Waiting for fresh table state.':m.other_window?'This hero is controlled in another live window.':!on?'Automatic play is on.':!ack?'Waiting for the bot to acknowledge manual control.':pending?'Action submitted; waiting for the table.':!o.turn_key?'Manual control is on. Waiting for hero’s turn.':'Your turn. Choose an action.';
