@@ -194,6 +194,17 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                     return response(store.live_view(sid,tail.removeprefix("live/")))
             if section == "metrics" and method == "GET" and tail is None:
                 return response(store.entry_metrics(sid,request.query))
+            if section == "sessions" and (tail is not None or method == "POST"):
+                from .sessions import Sessions
+                sessions=Sessions(store)
+                if method=="GET" and tail=="options":
+                    return response(sessions.options(sid))
+                if method=="POST" and tail is None:
+                    return response(sessions.create(sid,body),201)
+                stop=re.fullmatch(r"([0-9a-fA-F-]+)/stop",tail or '')
+                if method=="POST" and stop:
+                    return response(sessions.stop(sid,stop[1]))
+                raise Error(404,'Session endpoint not found')
             if section in ("tasks","sessions") and method == "GET" and tail is None:
                 return response(getattr(store,section)(sid,request.query))
             if section == "machines" and method == "GET" and tail:

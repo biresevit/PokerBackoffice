@@ -533,6 +533,7 @@ class Store:
         items=self.db.rows(f"""SELECT s.SessionId AS id,b.Username AS bot,s.MachineId AS machine_id,
             COALESCE(x.HostName,m.Description) AS machine,s.StartedUtc AS started,s.PlannedEndUtc AS planned_end,
             s.ActualEndUtc AS actual_end,s.IsOpen AS is_open,s.EndReason AS end_reason,
+            (SELECT r.IsManual FROM scheduler.AccountSession r WHERE r.SessionId=s.SessionId) AS is_manual,
             CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN CONVERT(bit,1) ELSE CONVERT(bit,0) END AS is_scheduled,
             CASE WHEN s.IsOpen=1 AND s.StartedUtc>SYSUTCDATETIME() THEN 0
                  ELSE DATEDIFF(second,s.StartedUtc,COALESCE(s.ActualEndUtc,SYSUTCDATETIME())) END AS duration_seconds,
