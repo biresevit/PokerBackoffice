@@ -1,6 +1,6 @@
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
 import {ManualControls} from './manual-controls.js?v=20261031.manual5';
-import {installUpdates} from './updates-ui.js?v=20261029-status1';
+import {installUpdates} from './updates-ui.js?v=20261031-immediate1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

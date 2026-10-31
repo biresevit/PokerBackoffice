@@ -27,6 +27,10 @@ class Account:
     eligible_after: datetime | None = None
     session_end: datetime | None = None
     drain_for_update: bool = False
+    # Operator-created session: plays up to max_tables outside the occupancy target,
+    # ignores the post-session cooldown and starts no earlier than session_start.
+    manual: bool = False
+    session_start: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,8 @@ class Plan:
     remaining_deficits: dict[str, int] = field(default_factory=dict)
     next_join: datetime | None = None
     next_leave: datetime | None = None
+    # Why each manual-session account got no join option on this pass (account id -> reason).
+    manual_blocked: dict[int, str] = field(default_factory=dict)
 
 
 def plan(settings: Settings, now: datetime, target: int, accounts: list[Account], machines: list[Machine],
@@ -141,8 +147,8 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
     owners: dict[int, set[int]] = {a.id: ({a.owner_machine} if a.owner_machine is not None else set()) for a in acc.values()}
     for e in active:
         owners[e.account].add(e.machine)
-    current = Counter(acc[e.account].tier for e in active)
-    draining = Counter(acc[e.account].tier for e in active if e.status == "draining")
+    current = Counter(acc[e.account].tier for e in active if not acc[e.account].manual)
+    draining = Counter(acc[e.account].tier for e in active if e.status == "draining" and not acc[e.account].manual)
     machine_count = Counter(e.machine for e in active)
     account_count = Counter(e.account for e in active)
     concentration = Counter((e.machine, e.table) for e in active)
@@ -207,14 +213,35 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
 
     for tier in TIERS:
         excess = max(0, current[tier] - desired[tier] - draining[tier] - planned_departures[tier])
-        candidates = sorted((e for e in active if acc[e.account].tier == tier and e.status in
-                             ("reserved", "seated", "sitting_out") and e.id not in planned_entry_ids),
+        candidates = sorted((e for e in active if acc[e.account].tier == tier and not acc[e.account].manual
+                             and e.status in ("reserved", "seated", "sitting_out") and e.id not in planned_entry_ids),
                             key=lambda e: (e.status != "reserved", -acc[e.account].played_seconds, e.id))
         for e in candidates[:excess]:
             if len(planned_entry_ids) >= settings.max_leaves:
                 break
             schedule_departure(e)
             # Leave capacity is retained until confirmation. Do not replace in this pass.
+
+    for a in acc.values():
+        if not a.manual or account_count[a.id] >= a.max_tables:
+            continue
+        pinned = sorted(owners[a.id])
+        reason = ("disabled or missing credentials" if not a.enabled or not a.credentials_ready else
+                  "lease needs reconciliation" if a.requires_reconciliation else
+                  f"pinned to several machines {pinned}" if len(pinned) > 1 else
+                  "session not started" if a.session_start is not None and now < a.session_start else
+                  "session ended" if a.session_end is not None and now >= a.session_end else None)
+        if reason is None and not any(not m.maintenance and machine_count[m.id] < m.capacity and (not pinned or m.id in pinned)
+                                      for m in ready.values()):
+            details = [f"{m.id}: enabled={m.enabled} ready={m.ready} maintenance={m.maintenance} "
+                       f"heartbeat_age={(now - m.heartbeat.astimezone(timezone.utc)).total_seconds():.0f}s "
+                       f"entries={machine_count[m.id]}/{m.capacity}" for m in mach.values() if m.id in pinned]
+            reason = f"machine not usable ({'; '.join(details) or 'none pinned'})"
+        if reason is None and not any(table_tier[t.id] == a.tier and table_count[t.id] < t.seats and (a.id, t.id) not in pairs
+                                      for t in supported.values()):
+            reason = f"no fresh {a.tier} table with a free seat"
+        if reason:
+            result.manual_blocked[a.id] = reason
 
     due_join = max(now, next_join or now)
     for _ in range(settings.max_joins):
@@ -225,9 +252,10 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
             if (not (a.enabled or simulation and a.synthetic) or a.synthetic and not simulation
                 or not a.credentials_ready and not (simulation and a.synthetic)
                 or a.requires_reconciliation or len(owners[a.id]) > 1 or account_count[a.id] >= a.max_tables
-                or a.eligible_after is not None and now < a.eligible_after
+                or not a.manual and a.eligible_after is not None and now < a.eligible_after
+                or a.manual and a.session_start is not None and now < a.session_start
                 or a.session_end is not None and now >= a.session_end
-                or current[a.tier] >= desired[a.tier]):
+                or not a.manual and current[a.tier] >= desired[a.tier]):
                 continue
             for t in supported.values():
                 if table_tier[t.id] != a.tier or table_count[t.id] >= t.seats or (a.id, t.id) in pairs:
@@ -238,6 +266,9 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
                     options.append((a, t, m))
         if not options:
             break
+        manual_options = [o for o in options if o[0].manual]
+        if manual_options:
+            options = manual_options
         under_limit = [o for o in options if o[0].played_seconds < o[0].max_minutes * 60]
         if under_limit:
             options = under_limit
@@ -250,6 +281,11 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
         # between accounts with the same number of entries.
         least_tables = min(account_count[o[0].id] for o in options)
         options = [o for o in options if account_count[o[0].id] == least_tables]
+        # A session outlives its tables (bust, failed join, no longer seated): refill it before
+        # starting a new session for another account.
+        resuming = [o for o in options if o[0].session_end is not None]
+        if resuming:
+            options = resuming
         available = {o[0].id: o[0] for o in options}
         chosen = rng.choices(list(available), weights=[FREQUENCY_WEIGHTS[a.frequency] /
                           (1 + a.played_seconds / 3600) for a in available.values()], k=1)[0]
@@ -271,7 +307,8 @@ def plan(settings: Settings, now: datetime, target: int, accounts: list[Account]
                                      soft_limit_override=not bool(under_limit)))
         result.next_join = due_join
         pairs.add((a.id, t.id))
-        current[a.tier] += 1
+        if not a.manual:
+            current[a.tier] += 1
         account_count[a.id] += 1
         machine_count[m.id] += 1
         table_count[t.id] += 1
