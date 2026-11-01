@@ -81,8 +81,8 @@ class ManualTasks:
     def create(self,site_id,body):
         site=operator(self.store,site_id)
         kind=str(body.get('kind') or '')
-        if kind not in ('join','leave','register_sng','register_mtt'):
-            raise Error(400,'Task type must be Join ring table, Leave ring table, Register SNG or Register MTT')
+        if kind not in ('join','leave','register_sng','register_mtt','unregister'):
+            raise Error(400,'Task type must be Join ring table, Leave ring table, Register SNG, Register MTT or Unregister SNG/MTT')
         try:account_id=int(body.get('account_id'))
         except (TypeError,ValueError):raise Error(400,'Choose a bot with an open session')
         # The scheduler takes this lock before it creates a join or leave for the account.
@@ -103,6 +103,18 @@ class ManualTasks:
             self.db.execute("""INSERT scheduler.Command(CommandId,SiteId,EntryId,MachineId,WorkerEpoch,Kind,Status,IsOpen,
                 ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'leave','pending',1,%s,%s,%s,%s)""",
                 command_id,site_id,entry['id'],session['machine_id'],session['epoch'],version,json.dumps({'manual':True}),now,now+timedelta(minutes=10))
+            table=entry['table_id'];table_name=entry['table_name']
+        elif kind=='unregister':
+            # Only before the tournament seats the bot: once it plays, it plays to the end.
+            waiting=[e for e in session['tables'] if e.get('table_type') in ('SNG','MTT') and e['status']=='joining' and not e['leaving']]
+            choice=str(body.get('table_id') or '')
+            entry=next((e for e in waiting if e['table_id']==choice),None)
+            if not entry:raise Error(409,f"{session['username']} is not waiting for that tournament to start, or an unregistration is already pending")
+            self.db.execute("""INSERT scheduler.Command(CommandId,SiteId,EntryId,MachineId,WorkerEpoch,Kind,Status,IsOpen,
+                ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'leave','pending',1,%s,%s,%s,%s)""",
+                command_id,site_id,entry['id'],session['machine_id'],session['epoch'],version,
+                json.dumps({'manual':True,'unregister':True,'format':entry['table_type'],
+                            'tournament_id':int(str(entry['table_id']).removeprefix('T'))}),now,now+timedelta(minutes=10))
             table=entry['table_id'];table_name=entry['table_name']
         elif kind in ('register_sng','register_mtt'):
             fmt='SNG' if kind=='register_sng' else 'MTT'

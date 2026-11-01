@@ -144,3 +144,18 @@ def test_leave_ignores_tournament_entries():
                                 big_blind=None, leaving=False, table_type='SNG')])
     with pytest.raises(Error, match='no seated table'):
         tasks(db).create(1, {'kind': 'leave', 'account_id': '4', 'table_id': 'any'})
+
+
+def test_unregister_targets_a_tournament_the_bot_is_waiting_for():
+    import json
+    waiting = dict(id='e1', account_id=4, table_id='T7', status='joining', table_name='Shootout SNG',
+                   big_blind=None, leaving=False, table_type='SNG')
+    playing = dict(waiting, id='e2', table_id='T8', status='seated')
+    db = Database(entries=[waiting, playing])
+    result = tasks(db).create(1, {'kind': 'unregister', 'account_id': '4', 'table_id': 'T7'})
+    assert result['table'] == 'T7' and result['kind'] == 'unregister'
+    sql, args = next((s, a) for s, a in db.writes if 'INSERT scheduler.Command' in s)
+    assert "'leave'" in sql and args[2] == 'e1'
+    assert json.loads(args[6]) == {'manual': True, 'unregister': True, 'format': 'SNG', 'tournament_id': 7}
+    with pytest.raises(Error, match='not waiting'):
+        tasks(Database(entries=[waiting, playing])).create(1, {'kind': 'unregister', 'account_id': '4', 'table_id': 'T8'})
