@@ -12,6 +12,10 @@ from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, userna
 from .distributions import Distributions
 
 
+ENTRY_FORMAT_SQL = "CASE WHEN lt.TableType IN ('SNG','MTT') THEN lt.TableType ELSE 'RING' END"
+ENTRY_LOBBY_JOIN = "LEFT JOIN scheduler.LobbyTable lt ON lt.SiteId=p.SiteId AND lt.TableId=p.TableId"
+
+
 def scheduled_target(schedule, instant=None):
     """Target entries for an instant, using the site's local weekday/time."""
     if not schedule["enabled"]:
@@ -364,6 +368,15 @@ class Store:
             site_id, fmt)
         return {"windows": rows, "format": fmt, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"]}
 
+    def schedules(self, site_id):
+        """Every format's weekly schedule in one query: {'RING': {...}, 'SNG': {...}, 'MTT': {...}}."""
+        site = self.site(site_id)
+        rows = self.db.rows("""SELECT Format AS format,Weekday AS weekday,StartMinute AS start_minute,EndMinute AS end_minute,
+            TargetEntries AS target FROM scheduler.ScheduleWindow WHERE SiteId=%s ORDER BY Weekday,StartMinute""", site_id)
+        return {fmt: {"windows": [{k: v for k, v in r.items() if k != "format"} for r in rows if r["format"] == fmt],
+                      "format": fmt, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"]}
+                for fmt in FORMATS}
+
     def save_schedule(self, site_id, body):
         site = self.site(site_id, lock=True, version=body.get("version"))
         values = windows(body)
@@ -670,9 +683,14 @@ class Store:
                     AND t.SampledUtc>=DATEADD(minute,-15,SYSUTCDATETIME())) averages
             WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""",self.ctx.customer_id)
         for machine in machines:machine_health(machine)
-        entries = self.db.rows("""SELECT CASE WHEN IsConfirmedSeat=1 THEN 'seated' WHEN Status IN ('reserved','joining') THEN Status ELSE 'uncertain' END AS status,COUNT(*) AS count
-            FROM backoffice.EntryPresence WHERE SiteId=%s AND IsOpen=1 AND IsLiveOwner=1
-            GROUP BY CASE WHEN IsConfirmedSeat=1 THEN 'seated' WHEN Status IN ('reserved','joining') THEN Status ELSE 'uncertain' END""",site_id)
+        # Ring entries count as seated when the observer confirms the seat. Tournament tables are not
+        # observed: a tournament entry is 'seated' once the tournament seated the bot, else 'registered'.
+        entries = self.db.rows(f"""SELECT x.format,x.status,COUNT(*) AS count FROM (
+            SELECT f.format,CASE WHEN f.format<>'RING' THEN CASE WHEN p.Status='seated' THEN 'seated'
+                    WHEN p.Status='joining' THEN 'registered' WHEN p.Status='reserved' THEN 'reserved' ELSE 'uncertain' END
+                WHEN p.IsConfirmedSeat=1 THEN 'seated' WHEN p.Status IN ('reserved','joining') THEN p.Status ELSE 'uncertain' END AS status
+            FROM backoffice.EntryPresence p {ENTRY_LOBBY_JOIN} CROSS APPLY(SELECT {ENTRY_FORMAT_SQL} AS format) f
+            WHERE p.SiteId=%s AND p.IsOpen=1 AND p.IsLiveOwner=1) x GROUP BY x.format,x.status""",site_id)
         zone=ZoneInfo(site["timezone"]);local_now=datetime.now(timezone.utc).astimezone(zone)
         today=datetime.combine(local_now.date(),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
         month=datetime.combine(local_now.date()-timedelta(days=29),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
@@ -681,7 +699,8 @@ class Store:
             SUM(CASE WHEN UploadedUtc>=%s THEN 1 ELSE 0 END) AS last_30_days,MAX(UploadedUtc) AS latest
             FROM dbo.CustomerHandHistory WHERE CustomerId=%s AND LEFT(BlobPath,LEN(%s))=%s""",
             today,month,self.ctx.customer_id,prefix,prefix)
-        schedule = self.schedule(site_id)
+        schedules = self.schedules(site_id)
+        schedule = schedules["RING"]
         online=sum(1 for machine in machines if machine["online"])
         warnings=[{"machine":m["name"] or f"Machine {m['id']}","message":warning}
                   for m in machines for warning in m["warnings"]]
@@ -689,15 +708,20 @@ class Store:
                                  for m in machines if not m["online"]),
                                 key=lambda m:(m["heartbeat"] is not None,m["heartbeat"] or datetime.min))
         return {"site": site, "accounts": accounts["total"], "synthetic_accounts": accounts["synthetic"],
-                "entries": entries, "scheduled_target": scheduled_target(schedule), "machines": machines,
+                "entries": entries, "targets": {fmt: scheduled_target(s) for fmt, s in schedules.items()},
+                "windows": {fmt: len(s["windows"]) for fmt, s in schedules.items()}, "machines": machines,
                 "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings,
                                    "offline_machines":offline_machines},
                 "hand_histories": history, "schedule": schedule}
 
     def entry_metrics(self, site_id, query):
-        """Scheduled target and confirmed running entries over a bounded date range."""
+        """Scheduled target and running entries of one format over a bounded date range.
+
+        RING: confirmed seated entries. SNG/MTT: bots registered in or playing a tournament, the
+        quantity the tournament target schedules (from registration until the bot's tournament ends)."""
         site = self.site(site_id)
-        schedule = self.schedule(site_id)
+        fmt = choice(query.get("format") or "RING", FORMATS, "format")
+        schedule = self.schedule(site_id, fmt)
         zone = ZoneInfo(site["timezone"])
         local_now = datetime.now(timezone.utc).astimezone(zone)
         try:
@@ -716,17 +740,25 @@ class Store:
         if stop <= start:
             raise Error(400, "The selected range has not started yet")
         step_minutes = 1 if days <= 2 else 30 if days <= 14 else 120
-        rows = self.db.rows("""SELECT SeatedUtc AS seated,CASE WHEN LastConfirmedUtc IS NOT NULL AND (ClosedUtc IS NULL OR ClosedUtc>DATEADD(second,60,LastConfirmedUtc)) THEN DATEADD(second,60,LastConfirmedUtc) ELSE ClosedUtc END AS closed
-            FROM scheduler.Entry WHERE SiteId=%s AND SeatedUtc IS NOT NULL
-              AND SeatedUtc<%s AND (ClosedUtc IS NULL OR ClosedUtc>%s)""",
-            site_id, stop.replace(tzinfo=None), start.replace(tzinfo=None))
+        if fmt == "RING":
+            rows = self.db.rows(f"""SELECT p.SeatedUtc AS seated,CASE WHEN p.LastConfirmedUtc IS NOT NULL AND (p.ClosedUtc IS NULL OR p.ClosedUtc>DATEADD(second,60,p.LastConfirmedUtc)) THEN DATEADD(second,60,p.LastConfirmedUtc) ELSE p.ClosedUtc END AS closed
+                FROM scheduler.Entry p {ENTRY_LOBBY_JOIN} WHERE p.SiteId=%s AND p.SeatedUtc IS NOT NULL AND {ENTRY_FORMAT_SQL}='RING'
+                  AND p.SeatedUtc<%s AND (p.ClosedUtc IS NULL OR p.ClosedUtc>%s)""",
+                site_id, stop.replace(tzinfo=None), start.replace(tzinfo=None))
+        else:
+            rows = self.db.rows(f"""SELECT p.CreatedUtc AS seated,p.ClosedUtc AS closed
+                FROM scheduler.Entry p {ENTRY_LOBBY_JOIN} WHERE p.SiteId=%s AND p.Status<>'failed' AND {ENTRY_FORMAT_SQL}=%s
+                  AND p.CreatedUtc<%s AND (p.ClosedUtc IS NULL OR p.ClosedUtc>%s)""",
+                site_id, fmt, stop.replace(tzinfo=None), start.replace(tzinfo=None))
         intervals = [(
             row["seated"].replace(tzinfo=timezone.utc),
             row["closed"].replace(tzinfo=timezone.utc) if row["closed"] else None
         ) for row in rows]
         points = entry_history_points(schedule, intervals, start, stop, step_minutes)
         if requested_stop>=datetime.now(timezone.utc) and points:
-            live=self.db.one('SELECT COUNT(*) AS n FROM backoffice.EntryPresence WHERE SiteId=%s AND IsOpen=1 AND IsConfirmedSeat=1',site_id)['n']
+            seated = "p.IsConfirmedSeat=1" if fmt == "RING" else "p.IsLiveOwner=1"
+            live=self.db.one(f"""SELECT COUNT(*) AS n FROM backoffice.EntryPresence p {ENTRY_LOBBY_JOIN}
+                WHERE p.SiteId=%s AND p.IsOpen=1 AND {seated} AND {ENTRY_FORMAT_SQL}=%s""",site_id,fmt)['n']
             points[-1]['running']=live
-        return {"from": from_day.isoformat(), "to": to_day.isoformat(), "timezone": site["timezone"],
+        return {"format": fmt, "from": from_day.isoformat(), "to": to_day.isoformat(), "timezone": site["timezone"],
                 "step_minutes": step_minutes, "points": points}

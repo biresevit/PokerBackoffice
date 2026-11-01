@@ -31,7 +31,11 @@ def test_all_read_pages_and_foreign_scope(store):
     assert isinstance(store.tasks(1,{}),dict)
     assert isinstance(store.sessions(1,{}),dict)
     metrics=store.entry_metrics(1,{"from":"2026-10-28","to":"2026-10-28"})
-    assert metrics["timezone"]=="Europe/Budapest" and metrics["points"]
+    assert metrics["timezone"]=="Europe/Budapest" and metrics["points"] and metrics["format"]=="RING"
+    for fmt in ("SNG","MTT"):
+        assert store.entry_metrics(1,{"from":"2026-10-28","to":"2026-10-28","format":fmt})["format"]==fmt
+    overview=store.overview(1)
+    assert set(overview["targets"])=={"RING","SNG","MTT"} and all(e["format"] in overview["targets"] for e in overview["entries"])
     machine=store.machines(1)["items"][0]
     resources=store.machine_metrics(1,machine["id"],{"hours":"24"})
     assert resources["hours"]==24 and isinstance(resources["points"],list)
