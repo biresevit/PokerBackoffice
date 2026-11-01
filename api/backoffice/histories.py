@@ -295,6 +295,7 @@ class Histories:
     def report(self, site_id, query):
         selected_bot = query.get("bot") or None
         # Players: your bots (default), the humans they played against, or both.
+        # Tournament hands (GameType 4) are played for tournament chips, not money: they are not winnings.
         players = query.get("players") or "bots"
         if players not in ("bots", "humans", "all"):
             raise Error(400, "Invalid players filter")
@@ -305,7 +306,7 @@ class Histories:
         scope = f"""FROM reporting.HandPlayerResult r
             JOIN reporting.HandProcessing p ON p.HandHistoryId=r.HandHistoryId AND p.Status='completed'
             JOIN dbo.CustomerHandHistory h ON h.Id=r.HandHistoryId
-            WHERE {where} AND p.HumanCount>=1 AND (%s IS NULL OR r.IsBot=%s) AND (%s IS NULL OR r.PlayerName=%s)"""
+            WHERE {where} AND p.HumanCount>=1 AND h.GameType<>4 AND (%s IS NULL OR r.IsBot=%s) AND (%s IS NULL OR r.PlayerName=%s)"""
         scope_args = (*args, is_bot, is_bot, selected_bot, selected_bot)
         rows = self.db.rows(f"""SELECT h.GameType AS game_id,r.PlayerName AS username,r.IsBot AS is_bot,
                 COUNT_BIG(*) AS hands,SUM(r.NetWinnings) AS net {scope}
