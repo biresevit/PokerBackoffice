@@ -30,6 +30,7 @@ FIELDS = {
     "rebuy_ring_chance": {"label": "Rebuy chance at ring tables", "table": "policy", "column": "RebuyRingChance", "kind": "chance"},
     "rebuy_tournament_chance": {"label": "Rebuy chance in SNG / MTT", "table": "policy", "column": "RebuyTournamentChance", "kind": "chance"},
     "show_cards_chance": {"label": "Show cards chance", "table": "policy", "column": "ShowCardsChance", "kind": "chance"},
+    "addon_chance": {"label": "Tournament add-on chance", "table": "policy", "column": "AddonChance", "kind": "chance"},
 }
 MAX_OPTIONS = 20
 

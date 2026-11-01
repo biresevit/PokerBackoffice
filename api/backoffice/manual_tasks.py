@@ -31,7 +31,7 @@ class ManualTasks:
             WHERE s.SiteId=%s AND s.IsOpen=1 AND s.StartedUtc<=SYSUTCDATETIME() AND m.CustomerId=%s ORDER BY b.Username""",
             site_id,self.store.ctx.customer_id)
         entries=self.db.rows("""SELECT e.EntryId AS id,e.BotAccountId AS account_id,e.TableId AS table_id,e.Status AS status,
-            COALESCE(t.TableName,e.TableId) AS table_name,t.BigBlind AS big_blind,
+            COALESCE(t.TableName,e.TableId) AS table_name,t.BigBlind AS big_blind,COALESCE(t.TableType,'RING') AS table_type,
             CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM scheduler.Command c WHERE c.EntryId=e.EntryId AND c.Kind='leave' AND c.IsOpen=1) THEN 1 ELSE 0 END) AS leaving
             FROM scheduler.Entry e LEFT JOIN scheduler.LobbyTable t ON t.SiteId=e.SiteId AND t.TableId=e.TableId
             WHERE e.SiteId=%s AND e.IsOpen=1""",site_id)
@@ -51,19 +51,35 @@ class ManualTasks:
                 AND e.Status IN ('reserved','joining')""",site_id,t['id'])['n']
         return rows
 
+    def tournaments(self,site_id):
+        """Open NLH tournaments seen in the last few minutes, with the stake tiers whose buy-in range fits them."""
+        ranges=self.db.rows('SELECT Tier,TournamentMinBuyIn,TournamentMaxBuyIn FROM scheduler.StakeBand WHERE SiteId=%s',site_id)
+        rows=self.db.rows("""SELECT TableId AS id,TableName AS name,TableType AS format,MinBuyIn AS buy_in,
+            OccupiedSeats AS registered,MaxSeats AS max_players,StartUtc AS start FROM scheduler.LobbyTable
+            WHERE SiteId=%s AND TableType IN ('SNG','MTT') AND TournamentState='registering' AND GameType='NLH'
+              AND ObservedUtc>=DATEADD(minute,-5,SYSUTCDATETIME())
+              AND (TableType='SNG' AND OccupiedSeats<MaxSeats OR TableType='MTT' AND StartUtc>DATEADD(minute,2,SYSUTCDATETIME()))
+            ORDER BY TableType,StartUtc,OccupiedSeats DESC""",site_id)
+        for t in rows:
+            t['tiers']=[r['Tier'] for r in ranges if r['TournamentMinBuyIn'] is not None
+                        and r['TournamentMinBuyIn']<=t['buy_in']<=r['TournamentMaxBuyIn']]
+        return rows
+
     def options(self,site_id):
-        sessions=self.sessions(site_id);tables=self.tables(site_id)
+        sessions=self.sessions(site_id);tables=self.tables(site_id);tournaments=self.tournaments(site_id)
         for s in sessions:
             seated={e['table_id'] for e in s['tables']}
             s['join_tables']=[t['id'] for t in tables if t['tier']==s['tier'] and t['id'] not in seated
                               and t['occupied']+t['reserved']<t['seats']]
+            s['tournaments']=[t['id'] for t in tournaments if s['tier'] in t['tiers'] and t['id'] not in seated]
             s.pop('epoch',None)
-        return {'sessions':sessions,'tables':tables}
+        return {'sessions':sessions,'tables':tables,'tournaments':tournaments}
 
     def create(self,site_id,body):
         site=operator(self.store,site_id)
         kind=str(body.get('kind') or '')
-        if kind not in ('join','leave'):raise Error(400,'Task type must be Join or Leave')
+        if kind not in ('join','leave','register_sng','register_mtt'):
+            raise Error(400,'Task type must be Join ring table, Leave ring table, Register SNG or Register MTT')
         try:account_id=int(body.get('account_id'))
         except (TypeError,ValueError):raise Error(400,'Choose a bot with an open session')
         # The scheduler takes this lock before it creates a join or leave for the account.
@@ -74,7 +90,9 @@ class ManualTasks:
         version=self.db.one('SELECT ConfigVersion FROM scheduler.Site WHERE SiteId=%s',site_id)['ConfigVersion']
         now=utcnow();command_id=str(uuid.uuid4())
         if kind=='leave':
-            open_tables=[e for e in session['tables'] if e['status'] in ('seated','sitting_out') and not e['leaving']]
+            # Leave applies to ring tables; a bot always plays its tournaments to the end.
+            open_tables=[e for e in session['tables'] if e['status'] in ('seated','sitting_out') and not e['leaving']
+                         and e.get('table_type','RING')=='RING']
             choice=str(body.get('table_id') or 'any')
             entry=random.SystemRandom().choice(open_tables) if choice=='any' and open_tables else \
                 next((e for e in open_tables if e['table_id']==choice),None)
@@ -83,6 +101,40 @@ class ManualTasks:
                 ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'leave','pending',1,%s,%s,%s,%s)""",
                 command_id,site_id,entry['id'],session['machine_id'],session['epoch'],version,json.dumps({'manual':True}),now,now+timedelta(minutes=10))
             table=entry['table_id'];table_name=entry['table_name']
+        elif kind in ('register_sng','register_mtt'):
+            fmt='SNG' if kind=='register_sng' else 'MTT'
+            if len(session['tables'])>=session['max_tables']:
+                raise Error(409,f"{session['username']} already uses its maximum of {session['max_tables']} tables")
+            lease=self.db.one('SELECT MachineId,WorkerEpoch,RequiresReconciliation FROM scheduler.AccountLease WHERE BotAccountId=%s',account_id)
+            if lease and (lease['MachineId']!=session['machine_id'] or str(lease['WorkerEpoch']).lower()!=str(session['epoch']).lower()
+                          or lease['RequiresReconciliation']):
+                raise Error(409,'The bot is still being reconciled on its PC. Try again in a minute.')
+            seated={e['table_id'] for e in session['tables']}
+            # Manual registration may pick any open tournament; the tier's buy-in range is only a default.
+            usable=[t for t in self.tournaments(site_id) if t['format']==fmt and t['id'] not in seated]
+            choice=str(body.get('table_id') or 'any')
+            if choice=='any':
+                usable=[t for t in usable if session['tier'] in t['tiers']]
+                if not usable:raise Error(409,f"No open {fmt} within the {session['tier']} tier's tournament buy-in range was seen in the last five minutes")
+                # Like the scheduler: SNG with the most players (starts soonest), MTT with the earliest start.
+                table_row=(max(usable,key=lambda t:t['registered']) if fmt=='SNG' else
+                           min(usable,key=lambda t:(t['start'],-t['registered'])))
+            else:
+                table_row=next((t for t in usable if t['id']==choice),None)
+                if not table_row:raise Error(409,f'That {fmt} is not open for registration, or the bot is already registered')
+            if not lease:
+                self.db.execute("""INSERT scheduler.AccountLease(BotAccountId,SiteId,MachineId,WorkerEpoch,LeaseToken,LeaseUntilUtc,LastConfirmedUtc)
+                    VALUES(%s,%s,%s,%s,%s,DATEADD(second,90,SYSUTCDATETIME()),SYSUTCDATETIME())""",
+                    account_id,site_id,session['machine_id'],session['epoch'],str(uuid.uuid4()))
+            entry_id=str(uuid.uuid4());table=table_row['id'];table_name=table_row['name']
+            self.db.execute("""INSERT scheduler.Entry(EntryId,SiteId,BotAccountId,MachineId,WorkerEpoch,TableId,Status,IsOpen,CreatedUtc,SessionId)
+                VALUES(%s,%s,%s,%s,%s,%s,'reserved',1,SYSUTCDATETIME(),%s)""",
+                entry_id,site_id,account_id,session['machine_id'],session['epoch'],table,session['session_id'])
+            self.db.execute("""INSERT scheduler.Command(CommandId,SiteId,EntryId,MachineId,WorkerEpoch,Kind,Status,IsOpen,
+                ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'join','pending',1,%s,%s,%s,%s)""",
+                command_id,site_id,entry_id,session['machine_id'],session['epoch'],version,
+                json.dumps({'account_id':account_id,'table_id':table,'manual':True,'format':fmt,
+                            'tournament_id':int(str(table).removeprefix('T'))}),now,now+timedelta(minutes=10))
         else:
             if len(session['tables'])>=session['max_tables']:
                 raise Error(409,f"{session['username']} already plays its maximum of {session['max_tables']} tables")

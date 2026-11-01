@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 PROFILES = {1: "Maniac", 2: "Agro Fish", 3: "Calling Station", 4: "Passive Fish",
             5: "Strong Balanced", 6: "Strong Tight", 7: "Strong Loose", 8: "Strong Mix"}
 TIERS = ("low", "medium", "high")
+FORMATS = ("RING", "SNG", "MTT")
 
 
 class Error(Exception):
@@ -122,8 +123,18 @@ def stake_bands(body):
             raise Error(400, "Stake limits must increase; percentages use at most two decimal places")
         if any(x != x.quantize(Decimal(".0001")) for x in (lower, upper)):
             raise Error(400, "Stake amounts support at most four decimal places")
+        # Optional tournament (SNG/MTT) buy-in range of the tier: both blank, or both set.
+        t_low, t_high = row.get("tournament_minimum"), row.get("tournament_maximum")
+        if t_low in (None, "") and t_high in (None, ""):
+            t_low = t_high = None
+        else:
+            t_low = number(t_low, field="tournament minimum buy-in")
+            t_high = number(t_high, field="tournament maximum buy-in")
+            if t_high < t_low:
+                raise Error(400, f"{row['tier'].title()} tournament buy-in: maximum must not be below minimum")
         result.append({"tier": row["tier"], "minimum": lower, "maximum": upper,
-                       "basis_points": int(pct * 100), "upper_inclusive": row["tier"] == "high"})
+                       "basis_points": int(pct * 100), "upper_inclusive": row["tier"] == "high",
+                       "tournament_minimum": t_low, "tournament_maximum": t_high})
     if sum(r["basis_points"] for r in result) != 10000:
         raise Error(400, "Stake percentages must total 100%")
     result.sort(key=lambda r: TIERS.index(r["tier"]))
@@ -153,4 +164,5 @@ def account_settings(body):
         "rebuy_ring_chance": number(body.get("rebuy_ring_chance"), 0, 1, "ring rebuy chance"),
         "rebuy_tournament_chance": number(body.get("rebuy_tournament_chance"), 0, 1, "tournament rebuy chance"),
         "show_cards_chance": number(body.get("show_cards_chance"), 0, 1, "show cards chance"),
+        "addon_chance": number(body.get("addon_chance"), 0, 1, "add-on chance"),
         "buy_in_weights": normalized}

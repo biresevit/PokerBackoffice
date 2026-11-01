@@ -19,13 +19,17 @@ class Database:
             dict(id='t2', name='Open', game='NLH', big_blind=Decimal(2), seats=6, occupied=3),
             dict(id='t3', name='Micro', game='NLH', big_blind=Decimal('0.1'), seats=6, occupied=2)]
         self.lease = lease
+        self.tournaments = []
 
     def rows(self, sql, *args):
         if 'FROM scheduler.AccountSession s' in sql: return [dict(self.session)]
         if 'FROM scheduler.Entry e LEFT JOIN' in sql: return [dict(e) for e in self.entries]
         if 'FROM scheduler.StakeBand' in sql:
-            return [dict(Tier='high', MinBigBlind=Decimal(1), MaxBigBlind=Decimal(4), UpperInclusive=True),
-                    dict(Tier='low', MinBigBlind=Decimal('.05'), MaxBigBlind=Decimal('.5'), UpperInclusive=False)]
+            return [dict(Tier='high', MinBigBlind=Decimal(1), MaxBigBlind=Decimal(4), UpperInclusive=True,
+                         TournamentMinBuyIn=Decimal(10), TournamentMaxBuyIn=Decimal(50)),
+                    dict(Tier='low', MinBigBlind=Decimal('.05'), MaxBigBlind=Decimal('.5'), UpperInclusive=False,
+                         TournamentMinBuyIn=None, TournamentMaxBuyIn=None)]
+        if "TableType IN ('SNG','MTT')" in sql: return [dict(t) for t in self.tournaments]
         if 'FROM scheduler.LobbyTable' in sql: return [dict(t) for t in self.lobby]
         raise AssertionError(sql)
 
@@ -94,3 +98,36 @@ def test_viewers_cannot_create_tasks():
     with pytest.raises(Error) as error:
         tasks(db, 'viewer').create(1, {'kind': 'join', 'account_id': 4})
     assert error.value.status == 403 and not db.writes
+
+
+def tournament(i, fmt, buy_in, registered, minutes=None):
+    from datetime import datetime, timedelta
+    start = datetime(2030, 1, 1) + timedelta(minutes=minutes) if minutes is not None else None
+    return dict(id=f'T{i}', name=f'{fmt} {i}', format=fmt, buy_in=Decimal(buy_in), registered=registered,
+                max_players=6 if fmt == 'SNG' else 3000, start=start)
+
+
+def test_register_sng_picks_the_fullest_sng_in_the_tier_buy_in_range():
+    import json
+    db = Database()
+    db.tournaments = [tournament(1, 'SNG', 20, 2), tournament(2, 'SNG', 20, 4), tournament(3, 'SNG', 200, 5),
+                      tournament(4, 'MTT', 20, 90, minutes=30)]
+    result = tasks(db).create(1, {'kind': 'register_sng', 'account_id': '4', 'table_id': 'any'})
+    # T3 has more players but its buy-in is outside the high tier's 10-50 range.
+    assert result['table'] == 'T2' and result['kind'] == 'register_sng'
+    command, = db.written('Command')
+    payload = json.loads(command[6])
+    assert payload['format'] == 'SNG' and payload['tournament_id'] == 2 and payload['manual'] is True
+
+
+def test_register_mtt_picks_the_earliest_start():
+    db = Database()
+    db.tournaments = [tournament(1, 'MTT', 20, 50, minutes=90), tournament(2, 'MTT', 20, 5, minutes=30)]
+    assert tasks(db).create(1, {'kind': 'register_mtt', 'account_id': '4', 'table_id': 'any'})['table'] == 'T2'
+
+
+def test_leave_ignores_tournament_entries():
+    db = Database(entries=[dict(id='e1', account_id=4, table_id='T7', status='seated', table_name='SNG',
+                                big_blind=None, leaving=False, table_type='SNG')])
+    with pytest.raises(Error, match='no seated table'):
+        tasks(db).create(1, {'kind': 'leave', 'account_id': '4', 'table_id': 'any'})

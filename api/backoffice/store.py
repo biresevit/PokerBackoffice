@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .validation import Error, PROFILES, TIERS, integer, username, windows, stake_bands, account_settings, parse_csv
+from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, username, windows, stake_bands, account_settings, parse_csv
 from .distributions import Distributions
 
 
@@ -181,7 +181,7 @@ class Store:
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
             p.RebuyRingChance AS rebuy_ring_chance,p.RebuyTournamentChance AS rebuy_tournament_chance,
-            p.ShowCardsChance AS show_cards_chance,
+            p.ShowCardsChance AS show_cards_chance,p.AddonChance AS addon_chance,
             p.BreakAfterMinSeconds/60 AS break_every_min_minutes,p.BreakAfterMaxSeconds/60 AS break_every_max_minutes,
             p.BreakMinSeconds AS break_min_seconds,p.BreakMaxSeconds AS break_max_seconds,
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
@@ -230,11 +230,12 @@ class Store:
                         values["strategy"], account_id)
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
             MaxPlaytimeMinutes=%s,MaxTables=%s,PostBbChance=%s,RunItTwiceChance=%s,
-            RebuyRingChance=%s,RebuyTournamentChance=%s,ShowCardsChance=%s,BuyInPolicyJson=%s,
+            RebuyRingChance=%s,RebuyTournamentChance=%s,ShowCardsChance=%s,AddonChance=%s,BuyInPolicyJson=%s,
             UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s""",
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
             values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
-            values["rebuy_tournament_chance"], values["show_cards_chance"], json.dumps(values["buy_in_weights"]), site_id, account_id)
+            values["rebuy_tournament_chance"], values["show_cards_chance"], values["addon_chance"],
+            json.dumps(values["buy_in_weights"]), site_id, account_id)
         if enabled is not None:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
         if durations:
@@ -354,29 +355,34 @@ class Store:
         self.audit("accounts.import", site_id, {"mode": body.get("mode", "upsert"), "counts": preview["counts"]})
         return {"counts": preview["counts"], "version": site["version"] + 1}
 
-    def schedule(self, site_id):
+    def schedule(self, site_id, fmt="RING"):
+        """One game format's weekly schedule: RING (tables), SNG or MTT (bots in tournaments at once)."""
         site = self.site(site_id)
+        fmt = choice(fmt, FORMATS, "schedule format")
         rows = self.db.rows("""SELECT Weekday AS weekday,StartMinute AS start_minute,EndMinute AS end_minute,
-            TargetEntries AS target FROM scheduler.ScheduleWindow WHERE SiteId=%s ORDER BY Weekday,StartMinute""", site_id)
-        return {"windows": rows, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"]}
+            TargetEntries AS target FROM scheduler.ScheduleWindow WHERE SiteId=%s AND Format=%s ORDER BY Weekday,StartMinute""",
+            site_id, fmt)
+        return {"windows": rows, "format": fmt, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"]}
 
     def save_schedule(self, site_id, body):
         site = self.site(site_id, lock=True, version=body.get("version"))
         values = windows(body)
+        fmt = choice(body.get("format") or "RING", FORMATS, "schedule format")
         zone = str(body.get("timezone", site["timezone"]))
         try:
             ZoneInfo(zone)
         except (ZoneInfoNotFoundError, ValueError):
             raise Error(400, "Unknown IANA timezone")
         self.db.execute("UPDATE scheduler.Site SET TimeZone=%s WHERE SiteId=%s", zone, site_id)
-        self.db.execute("EXEC scheduler.SetSchedule @SiteId=%s,@WindowsJson=%s", site_id, json.dumps(values))
-        self.audit("schedule.update", site_id, {"timezone": zone, "windows": values})
+        self.db.execute("EXEC scheduler.SetSchedule @SiteId=%s,@WindowsJson=%s,@Format=%s", site_id, json.dumps(values), fmt)
+        self.audit("schedule.update", site_id, {"format": fmt, "timezone": zone, "windows": values})
         return {"version": site["version"] + 1}
 
     def stakes(self, site_id):
         site = self.site(site_id)
         rows = self.db.rows("""SELECT Tier AS tier,MinBigBlind AS minimum,MaxBigBlind AS maximum,
-            UpperInclusive AS upper_inclusive,TargetBasisPoints/100.0 AS [percent]
+            UpperInclusive AS upper_inclusive,TargetBasisPoints/100.0 AS [percent],
+            TournamentMinBuyIn AS tournament_minimum,TournamentMaxBuyIn AS tournament_maximum
             FROM scheduler.StakeBand WHERE SiteId=%s ORDER BY MinBigBlind""", site_id)
         return {"bands": rows, "currency": site["currency"], "version": site["version"]}
 
@@ -385,7 +391,9 @@ class Store:
         bands = stake_bands(body)
         for b in bands:
             self.db.execute("""UPDATE scheduler.StakeBand SET MinBigBlind=%s,MaxBigBlind=%s,UpperInclusive=%s,
-                TargetBasisPoints=%s WHERE SiteId=%s AND Tier=%s""", b["minimum"], b["maximum"], b["upper_inclusive"], b["basis_points"], site_id, b["tier"])
+                TargetBasisPoints=%s,TournamentMinBuyIn=%s,TournamentMaxBuyIn=%s WHERE SiteId=%s AND Tier=%s""",
+                b["minimum"], b["maximum"], b["upper_inclusive"], b["basis_points"],
+                b["tournament_minimum"], b["tournament_maximum"], site_id, b["tier"])
         self.bump(site_id)
         self.audit("stakes.update", site_id, bands)
         return {"version": site["version"] + 1}
@@ -394,14 +402,21 @@ class Store:
         self.site(site_id)
         rows = self.db.rows("""SELECT t.TableId AS id,t.TableName AS name,t.GameType AS game,t.TableType AS table_type,t.BigBlind AS big_blind,
             t.CurrencyCode AS currency,t.MaxSeats AS seats,t.OccupiedSeats AS occupied,t.ObservedUtc AS observed,
-            t.FullSnapshotUtc AS snapshot,t.IsOpen AS is_open
+            t.FullSnapshotUtc AS snapshot,t.IsOpen AS is_open,t.MinBuyIn AS buy_in,t.StartUtc AS start,
+            t.TournamentState AS tournament_state
             FROM scheduler.LobbyTable t
             WHERE t.SiteId=%s
               AND t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
-              AND t.FullSnapshotUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
+              AND (t.TableType IN ('SNG','MTT') OR t.FullSnapshotUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME()))
               AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment o WHERE o.SiteId=t.SiteId AND o.MachineId=t.ObserverMachineId AND o.WorkerEpoch=t.ObserverEpoch AND o.IsReady=1 AND o.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()))
             ORDER BY t.BigBlind,t.TableName""", site_id)
         for row in rows:
+            if row["table_type"] in ("SNG", "MTT"):
+                # A tournament row has no seats; count our bots registered in or playing it.
+                row["players"] = []
+                row["bot_entries"] = self.db.one("""SELECT COUNT(*) AS n FROM scheduler.Entry
+                    WHERE SiteId=%s AND TableId=%s AND IsOpen=1""", site_id, row["id"])["n"]
+                continue
             row["players"] = self.db.rows("""SELECT s.SeatIndex AS seat,s.Username AS username,s.Stack AS stack,
                 s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,ra.AccountId AS account_id,
                 em.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine
@@ -532,6 +547,9 @@ class Store:
         bot=str(query.get("bot") or "").strip()[:100]
         kind=str(query.get("kind") or "all").lower()
         if kind not in ("all","join","leave","scan","update"):raise Error(400,"Invalid task type")
+        fmt=str(query.get("format") or "all").upper()
+        if fmt not in ("ALL",*FORMATS):raise Error(400,"Invalid game format")
+        fmt=fmt.lower() if fmt=="ALL" else fmt
         status=str(query.get("status") or "all").lower()
         if status not in ("all","pending","claimed","succeeded","failed","cancelled","expired","uncertain"):raise Error(400,"Invalid task status")
         page=integer(query.get("page",1),1,100000,"page")
@@ -540,24 +558,27 @@ class Store:
         start,stop=local_range(query,ZoneInfo(self.site(site_id)["timezone"]))
         cte="""WITH TaskRows AS(
             SELECT c.CommandId AS TaskId,c.SiteId,c.MachineId,c.Kind,c.Status,c.CreatedUtc,c.UpdatedUtc,
-                c.NotBeforeUtc,c.AttemptCount,c.ResultCode,c.ResultText,e.TableId,b.Username AS Bot
+                c.NotBeforeUtc,c.AttemptCount,c.ResultCode,c.ResultText,e.TableId,b.Username AS Bot,
+                COALESCE(lt.TableType,'RING') AS Format,lt.TableName
             FROM scheduler.Command c JOIN scheduler.Entry e ON e.EntryId=c.EntryId JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+            LEFT JOIN scheduler.LobbyTable lt ON lt.SiteId=e.SiteId AND lt.TableId=e.TableId
             UNION ALL
             SELECT t.TaskId,t.SiteId,t.MachineId,'update',
                 CASE WHEN t.Status='queued' THEN 'pending' WHEN t.Status='completed' THEN 'succeeded'
                      WHEN t.Status IN ('failed','rolled_back') THEN 'failed' WHEN t.Status='cancelled' THEN 'cancelled' ELSE 'claimed' END,
-                r.CreatedUtc,t.UpdatedUtc,r.NotBeforeUtc,CASE WHEN t.StartedUtc IS NULL THEN 0 ELSE 1 END,t.Status,t.Detail,'','All sessions'
+                r.CreatedUtc,t.UpdatedUtc,r.NotBeforeUtc,CASE WHEN t.StartedUtc IS NULL THEN 0 ELSE 1 END,t.Status,t.Detail,'','All sessions','',NULL
             FROM scheduler.MachineUpdateTask t JOIN scheduler.UpdateRollout r ON r.RolloutId=t.RolloutId)
             """
         where="""c.SiteId=%s AND (%s='' OR CONVERT(nvarchar(20),c.MachineId)=%s OR COALESCE(x.HostName,m.Description,'') LIKE %s)
             AND (%s='' OR c.Bot LIKE %s) AND (%s='all' OR c.Kind=%s) AND (%s='all' OR c.Status=%s)
-            AND c.CreatedUtc>=%s AND c.CreatedUtc<%s"""
-        args=(site_id,machine,machine,'%'+machine+'%',bot,'%'+bot+'%',kind,kind,status,status,start,stop)
+            AND (%s='all' OR c.Format=%s) AND c.CreatedUtc>=%s AND c.CreatedUtc<%s"""
+        args=(site_id,machine,machine,'%'+machine+'%',bot,'%'+bot+'%',kind,kind,status,status,fmt,fmt,start,stop)
         joins=" FROM TaskRows c JOIN dbo.CustomerMachine m ON m.MachineId=c.MachineId LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId "
         total=self.db.one(cte+'SELECT COUNT(*) AS n'+joins+'WHERE '+where,*args)['n']
         items=self.db.rows(cte+"""SELECT c.TaskId AS id,c.Kind AS kind,c.Status AS status,c.CreatedUtc AS created,
             c.UpdatedUtc AS updated,c.NotBeforeUtc AS due,c.AttemptCount AS attempts,c.ResultCode AS result_code,
             c.ResultText AS result_text,c.TableId AS table_id,c.Bot AS bot,c.MachineId AS machine_id,
+            c.Format AS format,c.TableName AS table_name,
             COALESCE(x.HostName,m.Description) AS machine"""+joins+'WHERE '+where+" ORDER BY c.CreatedUtc DESC,c.TaskId OFFSET %s ROWS FETCH NEXT %s ROWS ONLY",*args,(page-1)*size,size)
         choices=self.db.rows(cte+"""SELECT DISTINCT c.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine"""+joins+'WHERE c.SiteId=%s ORDER BY machine',site_id)
         bots=self.db.rows("SELECT b.Username AS username FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username",site_id)

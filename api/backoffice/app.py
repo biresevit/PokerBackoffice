@@ -208,7 +208,9 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 metric_match = re.fullmatch(r"(\d+)/metrics", tail)
                 if metric_match:
                     return response(store.machine_metrics(sid, int(metric_match[1]), request.query))
-            if method == "GET" and tail is None and section in ("overview", "accounts", "schedule", "stakes", "tables", "machines"):
+            if method == "GET" and tail is None and section == "schedule":
+                return response(store.schedule(sid, request.query.get("format") or "RING"))
+            if method == "GET" and tail is None and section in ("overview", "accounts", "stakes", "tables", "machines"):
                 return response(getattr(store, section)(sid))
             if section == "accounts":
                 if method == "POST" and tail in ("import-preview", "import"):
