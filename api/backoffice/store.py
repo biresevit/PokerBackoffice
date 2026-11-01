@@ -98,13 +98,18 @@ def local_range(query, zone, now=None):
 
 
 def live_table_sort_key(row):
-    """Ring formats first; tournaments follow, retaining occupancy priority per group."""
+    """Ring formats first, by occupancy. Then SNGs, most registrations first and then the highest
+    buy-in; then MTTs, the soonest start first. Registering tournaments come before running ones,
+    and finished ones go last."""
     table_type = str(row.get("table_type") or "RING").upper()
     game = str(row.get("game") or "").upper()
-    if table_type == "RING":
-        group = {"NLH": 0, "PLO4": 1, "PLO5": 2}.get(game, 5)
-    else:
-        group = {"SNG": 3, "MTT": 4}.get(table_type, 5)
+    state = {"registering": 0, "running": 1}.get(row.get("tournament_state"), 2)
+    if table_type == "SNG":
+        return (3, state, -row["occupied"], -(row.get("buy_in") or 0), row["name"])
+    if table_type == "MTT":
+        start = row.get("start")
+        return (4, state, start is None, start.timestamp() if start else 0, row["name"])
+    group = {"NLH": 0, "PLO4": 1, "PLO5": 2}.get(game, 5) if table_type == "RING" else 5
     return (group,
             0 if row["bot_entries"] else 1 if row["occupied"] else 2,
             -row["bot_entries"], -row["occupied"], row["big_blind"], row["name"])

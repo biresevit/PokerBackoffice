@@ -140,6 +140,21 @@ def test_live_table_default_order_groups_ring_formats_before_tournaments():
     assert ordered[0]["bot_entries"]==2
 
 
+def test_live_tournaments_sort_sngs_by_registrations_then_buy_in_and_mtts_by_start():
+    from datetime import datetime,timezone
+    def sng(name,occupied,buy_in):
+        return {"game":"NLH","table_type":"SNG","bot_entries":0,"occupied":occupied,"big_blind":1,"name":name,"buy_in":buy_in}
+    def mtt(name,hour):
+        return {"game":"NLH","table_type":"MTT","bot_entries":0,"occupied":9,"big_blind":1,"name":name,
+                "start":datetime(2026,11,1,hour,tzinfo=timezone.utc) if hour is not None else None}
+    items=[mtt("late",22),sng("a",2,5),mtt("none",None),sng("b",5,1),sng("c",5,10),mtt("soon",19)]
+    for x in items:x["tournament_state"]="registering"
+    done_sng,done_mtt=sng("done",6,10),mtt("past",8)
+    done_sng["tournament_state"]=done_mtt["tournament_state"]="completed"
+    items+=[done_sng,done_mtt]
+    assert [x["name"] for x in sorted(items,key=live_table_sort_key)]==["c","b","a","done","soon","late","none","past"]
+
+
 def test_site_reads_authorize_without_cleanup_writes():
     class DB:
         def __init__(self):self.reads=[]
