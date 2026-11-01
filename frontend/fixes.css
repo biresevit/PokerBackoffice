@@ -126,3 +126,11 @@ dialog.replay-dialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-h
 
 /* Sit out / I'm back share the switch row, aligned right. */
 .manual-head .manual-table-commands{margin:0 0 0 auto;padding:0;border:0}
+
+/* Grouped main menu: Live, Results, Setup, Fleet. The sidebar scrolls on short screens. */
+.sidebar{overflow-y:auto}
+.brand{margin-bottom:22px}
+.nav{gap:2px}
+.nav a{padding:8px 13px}
+.nav .nav-label{margin:14px 13px 4px;text-transform:uppercase}
+.scope-note{margin-top:20px}
