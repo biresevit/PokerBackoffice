@@ -2,6 +2,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 import pytest
 from backoffice.histories import Histories,hand_metrics,replay,winnings
+from backoffice.validation import Error
 
 HAND='''***** Hand History for Game 162968912 *****
 $1/$2 USD PLO
@@ -86,20 +87,49 @@ def test_winnings_report_uses_persisted_results_without_reading_blobs():
             if "AccountPolicy" in sql:
                 return [{"Username": "monica"}]
             assert "reporting.HandPlayerResult" in sql
-            return [{"game_id": 0, "username": "monica", "hands": 1200, "net": Decimal("42.50")}]
+            return [{"game_id": 0, "username": "monica", "is_bot": True, "hands": 1200, "net": Decimal("42.50")}]
 
         def one(self, sql, *args):
             assert "reporting.HandProcessing" in sql
+            if "COUNT(DISTINCT r.HandHistoryId)" in sql:
+                return {"hands": 1100, "results": 1200, "players": 1, "net": Decimal("42.50")}
             return {"total": 1200, "processed": 1200, "failed": 0}
 
     store = SimpleNamespace(db=Database(), ctx=SimpleNamespace(customer_id=1),
                             site=lambda _site_id: {"timezone": "Europe/Budapest", "name": "Evenbet"})
     histories = Histories(store)
     result = histories.report(1, {"from": "2026-10-01", "to": "2026-10-31"})
-    assert result["items"] == [{"game": "NLH", "username": "monica", "hands": 1200,
+    assert result["items"] == [{"game": "NLH", "username": "monica", "bot": True, "hands": 1200,
                                 "net": Decimal("42.50")}]
+    assert result["totals"] == {"hands": 1100, "results": 1200, "players": 1, "net": Decimal("42.50")}
+    assert result["players"] == "bots"
     assert result["processed"] == result["total"] == 1200
     assert result["next_cursor"] is None
+
+
+@pytest.mark.parametrize("players,expected", [("bots", 1), ("humans", 0), ("all", None)])
+def test_winnings_report_players_filter(players, expected):
+    seen = []
+
+    class Database:
+        def rows(self, sql, *args):
+            seen.append(args)
+            return []
+
+        def one(self, sql, *args):
+            return {"hands": 0, "results": 0, "players": 0, "net": 0, "total": 0, "processed": 0, "failed": 0}
+
+    store = SimpleNamespace(db=Database(), ctx=SimpleNamespace(customer_id=1),
+                            site=lambda _site_id: {"timezone": "Europe/Budapest", "name": "Evenbet"})
+    Histories(store).report(1, {"from": "2026-10-01", "to": "2026-10-31", "players": players})
+    # IsBot is passed twice ("%s IS NULL OR r.IsBot=%s"), just before the optional bot name.
+    assert seen[0][-4:-2] == (expected, expected)
+
+
+def test_winnings_report_rejects_unknown_players_filter():
+    store = SimpleNamespace(db=None, ctx=SimpleNamespace(customer_id=1), site=lambda _: {"timezone": "UTC", "name": "x"})
+    with pytest.raises(Error, match="players"):
+        Histories(store).report(1, {"players": "robots"})
 
 
 STALE_SHOWDOWN = (

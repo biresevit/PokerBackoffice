@@ -21,6 +21,7 @@ DEALT = re.compile(r"^Dealt to (?P<player>.+?) \[\s*(?P<cards>[^]]+)\]", re.I)
 SHOW = re.compile(r"^(?P<player>.+?) shows \[\s*(?P<cards>[^]]+)\]", re.I)
 BUTTON = re.compile(r"^Seat\s+(?P<seat>\d+)\s+is the button$", re.I)
 STREET = re.compile(r"^\*+\s*(?:Dealing\s+)?(?P<street>Flop|Turn|River)\s*\*+\s*\[\s*(?P<cards>[^]]+)\]", re.I)
+FOLD = re.compile(r"^(?P<player>.+?) folds\s*$", re.I)
 PLAY = re.compile(r"^(?P<player>.+?) (?P<verb>folds|checks|calls|bets|raises|posts small blind|posts big blind|posts ante)(?: \[\$(?P<amount>[\d.]+) USD\])?", re.I)
 
 
@@ -32,7 +33,7 @@ def winnings(text: str, bot_names: list[str]):
     if len(sections) == 1:
         raise ValueError("Unsupported hand-history format")
     for hand in sections[1:]:
-        contributions, prizes, players = defaultdict(Decimal), defaultdict(Decimal), set()
+        contributions, prizes, players, folded = defaultdict(Decimal), defaultdict(Decimal), set(), set()
         bb_match = re.search(r"^\$[\d.]+/\$([\d.]+)", hand, re.M)
         if not bb_match:
             raise ValueError("Missing big blind")
@@ -46,14 +47,17 @@ def winnings(text: str, bot_names: list[str]):
             if match:
                 contributions[match["player"].casefold()] += Decimal(match["amount"])
                 continue
+            match = FOLD.match(line)
+            if match:
+                folded.add(match["player"].casefold())
             match = WIN.match(line)
             if match:
                 prizes[match["player"].casefold()] += Decimal(match["amount"])
         if not contributions or not prizes:
             raise ValueError("Incomplete hand settlement")
-        ranked = sorted(contributions, key=lambda k: contributions[k], reverse=True)
-        if len(ranked) >= 2 and ranked[0] not in prizes and contributions[ranked[0]] > contributions[ranked[1]] >= bb:
-            contributions[ranked[0]] = contributions[ranked[1]]
+        # Same balancing as the stored results (shared schedule_controller.hand_settlement).
+        from schedule_controller.hand_settlement import balance
+        balance(contributions, prizes, players, folded, bb)
         for key in players & own.keys():
             results[own[key]]["hands"] += 1
             results[own[key]]["net"] += prizes[key] - contributions[key]
@@ -290,24 +294,34 @@ class Histories:
 
     def report(self, site_id, query):
         selected_bot = query.get("bot") or None
+        # Players: your bots (default), the humans they played against, or both.
+        players = query.get("players") or "bots"
+        if players not in ("bots", "humans", "all"):
+            raise Error(400, "Invalid players filter")
+        is_bot = {"bots": 1, "humans": 0, "all": None}[players]
         report_query = dict(query)
         report_query.pop("bot", None)
         where, args = self._where(site_id, report_query)
-        rows = self.db.rows(f"""SELECT h.GameType AS game_id,r.PlayerName AS username,
-                COUNT_BIG(*) AS hands,SUM(r.NetWinnings) AS net
-            FROM reporting.HandPlayerResult r
+        scope = f"""FROM reporting.HandPlayerResult r
             JOIN reporting.HandProcessing p ON p.HandHistoryId=r.HandHistoryId AND p.Status='completed'
             JOIN dbo.CustomerHandHistory h ON h.Id=r.HandHistoryId
-            WHERE {where} AND p.HumanCount>=1 AND r.IsBot=1 AND (%s IS NULL OR r.PlayerName=%s)
-            GROUP BY h.GameType,r.PlayerName ORDER BY r.PlayerName,h.GameType""",
-            *args, selected_bot, selected_bot)
+            WHERE {where} AND p.HumanCount>=1 AND (%s IS NULL OR r.IsBot=%s) AND (%s IS NULL OR r.PlayerName=%s)"""
+        scope_args = (*args, is_bot, is_bot, selected_bot, selected_bot)
+        rows = self.db.rows(f"""SELECT h.GameType AS game_id,r.PlayerName AS username,r.IsBot AS is_bot,
+                COUNT_BIG(*) AS hands,SUM(r.NetWinnings) AS net {scope}
+            GROUP BY h.GameType,r.PlayerName,r.IsBot ORDER BY r.PlayerName,h.GameType""", *scope_args)
+        totals = self.db.one(f"""SELECT COUNT(DISTINCT r.HandHistoryId) AS hands,COUNT_BIG(*) AS results,
+                COUNT(DISTINCT r.PlayerName) AS players,COALESCE(SUM(r.NetWinnings),0) AS net {scope}""", *scope_args)
         status = self.db.one(f"""SELECT COUNT(*) AS total,
                 SUM(CASE WHEN p.Status='completed' THEN 1 ELSE 0 END) AS processed,
                 SUM(CASE WHEN p.Status='failed' THEN 1 ELSE 0 END) AS failed
             FROM dbo.CustomerHandHistory h LEFT JOIN reporting.HandProcessing p ON p.HandHistoryId=h.Id
             WHERE {where} AND (p.Status IS NULL OR p.Status<>'completed' OR p.HumanCount>=1)""", *args)
         return {"items": [{"game": GAMES.get(row["game_id"], "Other"), "username": row["username"],
-                            "hands": row["hands"], "net": row["net"]} for row in rows],
+                            "bot": bool(row["is_bot"]), "hands": row["hands"], "net": row["net"]} for row in rows],
+                "players": players,
+                "totals": {"hands": int(totals["hands"] or 0), "results": int(totals["results"] or 0),
+                           "players": int(totals["players"] or 0), "net": totals["net"]},
                 "processed": int(status["processed"] or 0), "total": int(status["total"] or 0),
                 "skipped": [], "skipped_count": int(status["failed"] or 0), "next_cursor": None,
                 "note": "Calculated once at ingestion and aggregated from persisted per-player results."}

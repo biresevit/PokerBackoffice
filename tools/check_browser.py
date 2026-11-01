@@ -25,7 +25,7 @@ with sync_playwright() as p:
       return colors;
     }""")
     assert board_colors==['rgb(201, 28, 39)','rgb(32, 37, 34)'],board_colors
-    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tasks","Tasks"),("sessions","Sessions"),("tables","Live tables"),("histories","Hand histories"),("winnings","Bot winnings")]:
+    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tasks","Tasks"),("sessions","Sessions"),("tables","Live tables"),("histories","Hand histories"),("winnings","Winnings")]:
         page.goto("http://127.0.0.1:4280/#"+name)
         page.get_by_role("heading",name=title,exact=True,level=1).wait_for()
         page.wait_for_timeout(500)
@@ -124,9 +124,10 @@ with sync_playwright() as p:
             assert page.locator('#replay-table').evaluate("e=>e.getBoundingClientRect().height")==replay_height
             assert page.locator('.replay-dialog').evaluate("e=>e.getBoundingClientRect().height")==dialog_height
             page.locator('#close-dialog').click()
-            # Bot winnings is its own page; the filters applied here (game PLO4) carry over.
+            # Winnings is its own page; the filters applied here (game PLO4) carry over.
             page.locator('[data-page="winnings"]').click()
-            page.get_by_role('heading',name='Bot winnings',exact=True,level=2).wait_for(timeout=30000)
+            page.get_by_role('heading',name='Winnings',exact=True,level=2).wait_for(timeout=30000)
+            assert page.locator('.winnings-total').count()==1
             assert page.locator('[name="game"]').input_value()=='PLO4'
             assert page.locator('[name="sort"]').count()==0
         if name=="tables":
