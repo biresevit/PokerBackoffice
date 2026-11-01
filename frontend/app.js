@@ -1,5 +1,5 @@
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
-import {ManualControls} from './manual-controls.js?v=20261101.break1';
+import {ManualControls} from './manual-controls.js?v=20261101.mobile1';
 import {installUpdates} from './updates-ui.js?v=20261101.setup1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
 const $ = (s, root = document) => root.querySelector(s);
@@ -11,7 +11,7 @@ const tiers = ['low','medium','high'];
 const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const date = (v, zone = state.site?.timezone) => v ? new Date(v).toLocaleString(undefined, {timeZone:zone}) : 'Not received';
 const duration = n => n == null ? 'Not reached' : `${Math.floor(n/60)}m ${Math.round(n%60)}s`;
-const seatPosition = (i,n) => {const a=Math.PI/2+2*Math.PI*i/Math.max(n,1);return `left:${50+42*Math.cos(a)}%;top:${50+44*Math.sin(a)}%`};
+const seatPosition = (i,n) => {const a=Math.PI/2+2*Math.PI*i/Math.max(n,1);return `left:calc(50% + ${42*Math.cos(a)}% * var(--seat-spread-x,1));top:${50+44*Math.sin(a)}%`};
 // Bets sit on their own inner ring. Keep this far enough inside the seat ring
 // that the marker cannot be covered by the cards extending above a player box.
 const betPosition = (i,n) => {

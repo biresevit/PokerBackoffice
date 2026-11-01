@@ -69,3 +69,50 @@
 .choice-card:has(input:checked){border-color:var(--green);box-shadow:0 0 0 2px #2c5e4326;background:#f6faf3}
 .choice-card .choice-input{margin-top:6px;max-width:240px}
 .pairing-form{margin-top:16px;align-items:end}
+
+/* Phones: fit the live table, its manual controls and the hand replay on one screen. */
+@media(hover:none) and (pointer:coarse){.manual-control kbd{display:none}}
+@media(max-width:600px){
+.live-window>header{height:50px;padding:0 12px;gap:10px}
+.live-window>header img{width:26px}
+.live-window main{padding:8px 8px 0}
+.live-title h1{font-size:19px;letter-spacing:-.4px;margin-bottom:0}
+.live-title p{margin-bottom:4px}
+.hand-result{margin:2px auto 4px;padding:4px 10px;font-size:11px}
+.live-felt{--seat-spread-x:.82;width:100%;min-height:330px;border-width:7px;border-radius:40%}
+.live-window .live-felt{margin-top:30px;margin-bottom:8px}
+.live-felt .replay-seat{width:80px;padding:5px 4px 4px;font-size:10px}
+.live-felt .replay-seat>span{font-size:12px}
+.live-felt .seat-timer{font-size:.7rem}
+.playing-card{width:27px;height:38px;padding:2px 3px;border-radius:4px}
+.playing-card b{font-size:12px}
+.playing-card span{font-size:16px}
+.cards.board .playing-card{width:32px;height:45px}
+.cards.board .playing-card b{font-size:14px}
+.cards.board .playing-card span{font-size:20px}
+.live-felt .replay-center strong{font-size:14px;padding:2px 7px}
+.live-felt .replay-center{display:flex;flex-direction:column;align-items:center;top:43%}
+.live-felt .replay-center>span{order:-1;margin:0 0 3px;font-size:10px}
+.live-felt .table-bet{z-index:5}
+.replay-action-bubble{top:-21px;padding:2px 6px;font-size:10px}
+.table-bet{font-size:10px;padding:1px 4px}
+.live-window aside{padding:0 8px 10px}
+.manual-control{margin:6px auto;padding:10px}
+.manual-switch{font-size:.9rem}
+.manual-sizing{gap:6px;margin-top:8px}
+.manual-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;width:100%}
+.manual-presets .button{min-width:0;min-height:34px;padding:4px 2px;font-size:12px}
+.manual-amount{min-width:0;width:100%;padding:4px 8px;gap:8px}
+.manual-amount input[name=manual-amount]{width:72px;padding:5px 6px}
+.manual-actions{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
+.manual-act{min-height:44px;padding:0 4px;font-size:.92rem}
+.manual-act span{white-space:nowrap}
+.manual-table-commands{margin-top:6px;padding-top:6px}
+.manual-table-commands .button{min-height:30px;padding:4px 10px}
+dialog.replay-dialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-height:96vh}
+.replay-dialog .dialog-head{padding:10px 12px}
+.replay-dialog .dialog-head h2{font-size:16px}
+.replay-dialog .dialog-content{padding:6px 6px 8px;max-height:none}
+.replay-felt{min-height:340px;margin:32px auto 8px}
+.replay-dialog .dialog-footer{padding:8px 12px}
+}

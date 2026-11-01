@@ -10,7 +10,7 @@ export const amountProblem=(text,o,wager)=>{
 };
 
 // Sizing presets as on the table: multiples of the big blind (or of the bet faced) before the flop, pot fractions after.
-const PREFLOP=[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB'],['max','Max']],POSTFLOP=[[1/3,'33% Pot'],[1/2,'50% Pot'],[3/4,'75% Pot'],[1,'Pot']];
+const PREFLOP=[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB'],['max','Max']],POSTFLOP=[[1/3,'33%'],[1/2,'50%'],[3/4,'75%'],[1,'Pot']];
 export const presetTarget=(value,o,payload)=>{
  if(value==='max')return o.max_target_minor;
  const bets=(payload?.seats||[]).map(s=>Math.round(Number(s.bet||0)*100));
