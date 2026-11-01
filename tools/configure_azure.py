@@ -54,8 +54,8 @@ def main():
             "scheduler.Site":"SELECT,UPDATE","scheduler.AccountPolicy":"SELECT,INSERT,UPDATE",
             "scheduler.ChatMessage":"SELECT","scheduler.ChatAgent":"SELECT",
             "scheduler.ChatCommand":"SELECT,INSERT","backoffice.ChatReadState":"SELECT,INSERT,UPDATE",
-            "scheduler.AccountDay":"SELECT","scheduler.Entry":"SELECT","scheduler.AccountLease":"SELECT",
-            "scheduler.AccountSession":"SELECT","scheduler.Command":"SELECT","scheduler.MachineTelemetry":"SELECT",
+            "scheduler.AccountDay":"SELECT","scheduler.Entry":"SELECT,INSERT","scheduler.AccountLease":"SELECT,INSERT",
+            "scheduler.AccountSession":"SELECT","scheduler.Command":"SELECT,INSERT","scheduler.Outbox":"INSERT","scheduler.MachineTelemetry":"SELECT",
             "scheduler.ScheduleWindow":"SELECT","scheduler.StakeBand":"SELECT,UPDATE",
             "scheduler.LobbyTable":"SELECT","scheduler.TableSeat":"SELECT","scheduler.MachineAssignment":"SELECT,UPDATE",
             "scheduler.LiveViewRequest":"SELECT,INSERT,UPDATE","scheduler.LiveTableSnapshot":"SELECT"}
