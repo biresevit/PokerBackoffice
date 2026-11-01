@@ -50,7 +50,7 @@ def main():
             "reporting.HandProcessing":"SELECT","reporting.HandPlayerResult":"SELECT",
             "dbo.BotAccount":"SELECT,INSERT,UPDATE","backoffice.Membership":"SELECT",
             "backoffice.AccessRequest":"SELECT,INSERT","backoffice.AuditLog":"SELECT,INSERT",
-            "backoffice.MachineMetadata":"SELECT,UPDATE","backoffice.MachineAllowedSite":"SELECT,INSERT,DELETE",
+            "backoffice.MachineMetadata":"SELECT,UPDATE","backoffice.AccountDistribution":"SELECT,INSERT,UPDATE,DELETE","backoffice.MachineAllowedSite":"SELECT,INSERT,DELETE",
             "scheduler.Site":"SELECT,UPDATE","scheduler.AccountPolicy":"SELECT,INSERT,UPDATE",
             "scheduler.ChatMessage":"SELECT","scheduler.ChatAgent":"SELECT",
             "scheduler.ChatCommand":"SELECT,INSERT","backoffice.ChatReadState":"SELECT,INSERT,UPDATE",

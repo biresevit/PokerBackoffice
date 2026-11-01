@@ -56,21 +56,24 @@ def parse_csv(text):
         raise Error(400, "CSV must be smaller than 1 MB")
     reader = csv.reader(io.StringIO(text.lstrip("\ufeff")), strict=True)
     try:
-        header = next(reader, [])
-        if len(header) != 2 or header[0].strip().casefold() not in ("username", "nickname") or header[1].strip().casefold() != "profile":
-            raise Error(400, "CSV header must be username,profile (nickname is also accepted)")
+        header = [h.strip().casefold() for h in next(reader, [])]
+        # The profile column is optional: a missing or blank profile is assigned from the site's
+        # profile distribution when the account is created.
+        if not 1 <= len(header) <= 2 or header[0] not in ("username", "nickname") or header[1:] not in ([], ["profile"]):
+            raise Error(400, "CSV header must be username,profile or just username (nickname is also accepted)")
         rows, seen = [], set()
         profiles = {v.casefold(): k for k, v in PROFILES.items()}
         for line, row in enumerate(reader, 2):
             if not row or not any(v.strip() for v in row):
                 continue
-            if len(row) != 2:
-                raise Error(400, f"Line {line}: expected exactly two columns")
+            if len(row) > len(header):
+                raise Error(400, f"Line {line}: expected at most {len(header)} columns")
             name = username(row[0])
             if name.casefold() in seen:
                 raise Error(400, f"Line {line}: duplicate username {name}")
-            profile = profiles.get(row[1].strip().casefold())
-            if profile is None:
+            text = row[1].strip() if len(row) > 1 else ""
+            profile = profiles.get(text.casefold()) if text else None
+            if text and profile is None:
                 raise Error(400, f"Line {line}: unknown profile {row[1]}")
             rows.append({"username": name, "strategy": profile})
             seen.add(name.casefold())

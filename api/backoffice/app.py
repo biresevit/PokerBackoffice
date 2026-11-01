@@ -213,6 +213,17 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             if section == "accounts":
                 if method == "POST" and tail in ("import-preview", "import"):
                     return response(store.import_accounts(sid, body, apply=tail == "import"))
+                if tail and (tail == "distributions" or tail.startswith("distributions/")):
+                    from .distributions import Distributions
+                    dist = Distributions(store)
+                    rest = tail.removeprefix("distributions").strip("/")
+                    if method == "GET" and not rest:
+                        return response(dist.list(sid))
+                    if method == "POST" and rest in ("preview", "apply"):
+                        return response(dist.preview(sid, body) if rest == "preview" else dist.apply(sid, body))
+                    if method == "PUT" and rest:
+                        return response(dist.save(sid, rest, body))
+                    raise Error(404, "Distribution endpoint not found")
                 if tail and tail.isdecimal():
                     if method == "PUT":
                         return response(store.update_account(sid, int(tail), body))
