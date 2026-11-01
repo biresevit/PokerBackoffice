@@ -155,6 +155,15 @@ def test_live_tournaments_sort_sngs_by_registrations_then_buy_in_and_mtts_by_sta
     assert [x["name"] for x in sorted(items,key=live_table_sort_key)]==["c","b","a","done","soon","late","none","past"]
 
 
+def test_tournament_exclusions_are_validated_and_matched_ignoring_case():
+    from backoffice.validation import tournament_exclusions,is_excluded_tournament
+    assert tournament_exclusions("Shootout\n\n  Spin \nShootout")==["Shootout","Spin"]
+    assert tournament_exclusions([])==[]
+    with pytest.raises(Error):tournament_exclusions(["x"*101])
+    with pytest.raises(Error):tournament_exclusions(5)
+    assert is_excluded_tournament("Shootout SNG",["shootout"]) and not is_excluded_tournament("Sandstorm",["shootout"])
+
+
 def test_site_reads_authorize_without_cleanup_writes():
     class DB:
         def __init__(self):self.reads=[]

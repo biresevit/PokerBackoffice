@@ -110,6 +110,26 @@ def windows(body):
     return result
 
 
+def tournament_exclusions(value):
+    """Tournament names to avoid: a list or newline-separated text, one name (substring) each."""
+    items = value.splitlines() if isinstance(value, str) else value if isinstance(value, list) else None
+    if items is None or not all(isinstance(x, str) for x in items):
+        raise Error(400, "Excluded tournament names must be text, one name per line")
+    names = list(dict.fromkeys(x.strip() for x in items if x.strip()))
+    if len(names) > 50 or any(len(x) > 100 for x in names):
+        raise Error(400, "Use at most 50 excluded tournament names of up to 100 characters each")
+    text = "\n".join(names)
+    if len(text) > 2000:
+        raise Error(400, "The excluded tournament names are too long")
+    return names
+
+
+def is_excluded_tournament(name, excluded):
+    """True when the tournament name contains any excluded name, ignoring case (as the scheduler does)."""
+    name = str(name or "").casefold()
+    return any(x.casefold() in name for x in excluded)
+
+
 def stake_bands(body):
     rows = body.get("bands")
     if not isinstance(rows, list) or len(rows) != 3 or not all(isinstance(r, dict) for r in rows) or {r.get("tier") for r in rows} != set(TIERS):

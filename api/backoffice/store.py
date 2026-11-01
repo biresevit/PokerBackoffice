@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, username, windows, stake_bands, account_settings, parse_csv
+from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, username, windows, stake_bands, tournament_exclusions, account_settings, parse_csv
 from .distributions import Distributions
 
 
@@ -402,18 +402,26 @@ class Store:
             UpperInclusive AS upper_inclusive,TargetBasisPoints/100.0 AS [percent],
             TournamentMinBuyIn AS tournament_minimum,TournamentMaxBuyIn AS tournament_maximum
             FROM scheduler.StakeBand WHERE SiteId=%s ORDER BY MinBigBlind""", site_id)
-        return {"bands": rows, "currency": site["currency"], "version": site["version"]}
+        return {"bands": rows, "currency": site["currency"], "version": site["version"],
+                "excluded_tournaments": self.excluded_tournaments(site_id)}
+
+    def excluded_tournaments(self, site_id):
+        """Tournament names this site's bots never register for (substrings, any case)."""
+        row = self.db.one("SELECT ExcludedTournamentNames AS names FROM scheduler.Site WHERE SiteId=%s", site_id)
+        return [x.strip() for x in str((row or {}).get("names") or "").splitlines() if x.strip()]
 
     def save_stakes(self, site_id, body):
         site = self.site(site_id, lock=True, version=body.get("version"))
         bands = stake_bands(body)
+        excluded = tournament_exclusions(body.get("excluded_tournaments", self.excluded_tournaments(site_id)))
+        self.db.execute("UPDATE scheduler.Site SET ExcludedTournamentNames=%s WHERE SiteId=%s", "\n".join(excluded), site_id)
         for b in bands:
             self.db.execute("""UPDATE scheduler.StakeBand SET MinBigBlind=%s,MaxBigBlind=%s,UpperInclusive=%s,
                 TargetBasisPoints=%s,TournamentMinBuyIn=%s,TournamentMaxBuyIn=%s WHERE SiteId=%s AND Tier=%s""",
                 b["minimum"], b["maximum"], b["upper_inclusive"], b["basis_points"],
                 b["tournament_minimum"], b["tournament_maximum"], site_id, b["tier"])
         self.bump(site_id)
-        self.audit("stakes.update", site_id, bands)
+        self.audit("stakes.update", site_id, {"bands": bands, "excluded_tournaments": excluded})
         return {"version": site["version"] + 1}
 
     def tables(self, site_id):

@@ -20,6 +20,7 @@ class Database:
             dict(id='t3', name='Micro', game='NLH', big_blind=Decimal('0.1'), seats=6, occupied=2)]
         self.lease = lease
         self.tournaments = []
+        self.excluded = []
 
     def rows(self, sql, *args):
         if 'FROM scheduler.AccountSession s' in sql: return [dict(self.session)]
@@ -47,7 +48,8 @@ class Database:
 
 def tasks(db, role='operator'):
     store = SimpleNamespace(db=db, ctx=SimpleNamespace(role=role, customer_id=1, subject='me'),
-                            site=lambda s: {'timezone': 'UTC'}, audit=lambda *a: None)
+                            site=lambda s: {'timezone': 'UTC'}, audit=lambda *a: None,
+                            excluded_tournaments=lambda s: list(db.excluded))
     return ManualTasks(store)
 
 
@@ -118,6 +120,17 @@ def test_register_sng_picks_the_fullest_sng_in_the_tier_buy_in_range():
     command, = db.written('Command')
     payload = json.loads(command[6])
     assert payload['format'] == 'SNG' and payload['tournament_id'] == 2 and payload['manual'] is True
+
+
+def test_register_skips_tournaments_with_an_excluded_name():
+    db = Database()
+    db.tournaments = [tournament(1, 'SNG', 20, 5), tournament(2, 'SNG', 20, 2)]
+    db.tournaments[0]['name'] = 'Shootout SNG'
+    db.excluded = ['SHOOTOUT']
+    assert tasks(db).create(1, {'kind': 'register_sng', 'account_id': '4', 'table_id': 'any'})['table'] == 'T2'
+    assert [t['id'] for t in tasks(db).options(1)['tournaments']] == ['T2']
+    with pytest.raises(Error):
+        tasks(db).create(1, {'kind': 'register_sng', 'account_id': '4', 'table_id': 'T1'})
 
 
 def test_register_mtt_picks_the_earliest_start():

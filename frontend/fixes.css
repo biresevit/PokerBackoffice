@@ -156,3 +156,4 @@ dialog.replay-dialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-h
 
 /* Stakes: tournament buy-in range per tier. */
 .stake-subtitle{margin:18px 0 8px;font-size:13px}
+.stake-exclusions{margin-top:20px}.stake-exclusions textarea{width:100%;font-size:12px}

@@ -8,7 +8,7 @@ import random
 import uuid
 from datetime import datetime,timedelta,timezone
 from .updates import operator
-from .validation import Error
+from .validation import Error, is_excluded_tournament
 
 
 def utcnow():
@@ -52,7 +52,8 @@ class ManualTasks:
         return rows
 
     def tournaments(self,site_id):
-        """Open NLH tournaments seen in the last few minutes, with the stake tiers whose buy-in range fits them."""
+        """Open NLH tournaments seen in the last few minutes, with the stake tiers whose buy-in range fits them.
+        Tournaments whose name contains one of the site's excluded names are left out."""
         ranges=self.db.rows('SELECT Tier,TournamentMinBuyIn,TournamentMaxBuyIn FROM scheduler.StakeBand WHERE SiteId=%s',site_id)
         rows=self.db.rows("""SELECT TableId AS id,TableName AS name,TableType AS format,MinBuyIn AS buy_in,
             OccupiedSeats AS registered,MaxSeats AS max_players,StartUtc AS start FROM scheduler.LobbyTable
@@ -60,6 +61,8 @@ class ManualTasks:
               AND ObservedUtc>=DATEADD(minute,-5,SYSUTCDATETIME())
               AND (TableType='SNG' AND OccupiedSeats<MaxSeats OR TableType='MTT' AND StartUtc>DATEADD(minute,2,SYSUTCDATETIME()))
             ORDER BY TableType,StartUtc,OccupiedSeats DESC""",site_id)
+        excluded=self.store.excluded_tournaments(site_id)
+        rows=[t for t in rows if not is_excluded_tournament(t['name'],excluded)]
         for t in rows:
             t['tiers']=[r['Tier'] for r in ranges if r['TournamentMinBuyIn'] is not None
                         and r['TournamentMinBuyIn']<=t['buy_in']<=r['TournamentMaxBuyIn']]
