@@ -1,5 +1,5 @@
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
-import {ManualControls} from './manual-controls.js?v=20261101.mobile1';
+import {ManualControls} from './manual-controls.js?v=20261101.mobile2';
 import {installUpdates} from './updates-ui.js?v=20261101.setup1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
 const $ = (s, root = document) => root.querySelector(s);
