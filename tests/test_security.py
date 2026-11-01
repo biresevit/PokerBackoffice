@@ -205,7 +205,7 @@ def test_account_rebuy_chances_are_required_probabilities():
     from backoffice.validation import account_settings
     body = {"strategy": 5, "stake": "high", "frequency": "low", "max_minutes": 240, "max_tables": 4,
             "post_bb_chance": .1, "run_it_twice_chance": .9, "rebuy_ring_chance": .85,
-            "rebuy_tournament_chance": .4, "buy_in_weights": {"100": 100}}
+            "rebuy_tournament_chance": .4, "show_cards_chance": .05, "buy_in_weights": {"100": 100}}
     values = account_settings(body)
     assert (float(values["rebuy_ring_chance"]), float(values["rebuy_tournament_chance"])) == (.85, .4)
     for field, value in (("rebuy_ring_chance", 1.2), ("rebuy_tournament_chance", None)):

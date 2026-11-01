@@ -180,6 +180,7 @@ class Store:
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
             p.RebuyRingChance AS rebuy_ring_chance,p.RebuyTournamentChance AS rebuy_tournament_chance,
+            p.ShowCardsChance AS show_cards_chance,
             p.BreakAfterMinSeconds/60 AS break_every_min_minutes,p.BreakAfterMaxSeconds/60 AS break_every_max_minutes,
             p.BreakMinSeconds AS break_min_seconds,p.BreakMaxSeconds AS break_max_seconds,
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
@@ -228,11 +229,11 @@ class Store:
                         values["strategy"], account_id)
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
             MaxPlaytimeMinutes=%s,MaxTables=%s,PostBbChance=%s,RunItTwiceChance=%s,
-            RebuyRingChance=%s,RebuyTournamentChance=%s,BuyInPolicyJson=%s,
+            RebuyRingChance=%s,RebuyTournamentChance=%s,ShowCardsChance=%s,BuyInPolicyJson=%s,
             UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s""",
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
             values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
-            values["rebuy_tournament_chance"], json.dumps(values["buy_in_weights"]), site_id, account_id)
+            values["rebuy_tournament_chance"], values["show_cards_chance"], json.dumps(values["buy_in_weights"]), site_id, account_id)
         if enabled is not None:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
         if durations:
@@ -272,6 +273,7 @@ class Store:
         return (least("StakeTier", TIERS), least("PlayingFrequency", TIERS),
                 least("MaxPlaytimeMinutes", (120, 240, 360)), round(random.uniform(0, .2 if strong else 1), 5),
                 round(random.uniform(.8 if strong else 0, 1), 5),
+                round(random.uniform(.02, .10) if strong else random.uniform(.05, .90), 5),
                 {"20": 5, "30": 5, "40": 5, "100": 65, "200": 20} if strong else
                 {"20": 6.25, "30": 6.25, "40": 6.25, "50": 6.25, "100": 55, "200": 15, "irregular": 5})
 
@@ -318,10 +320,10 @@ class Store:
             if kind == "create":
                 aid = self.db.one("""INSERT dbo.BotAccount(Casino,Username,Strategy) OUTPUT inserted.BotAccountId AS id
                     VALUES(%s,%s,%s)""", site["name"], change["username"], change["strategy"])["id"]
-                tier, freq, minutes, post, rit, weights = self._defaults(site_id, change["strategy"])
+                tier, freq, minutes, post, rit, show, weights = self._defaults(site_id, change["strategy"])
                 self.db.execute("""INSERT scheduler.AccountPolicy(BotAccountId,SiteId,StakeTier,PlayingFrequency,
-                    MaxPlaytimeMinutes,PostBbChance,RunItTwiceChance,BuyInPolicyJson)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""", aid, site_id, tier, freq, minutes, post, rit, json.dumps(weights))
+                    MaxPlaytimeMinutes,PostBbChance,RunItTwiceChance,ShowCardsChance,BuyInPolicyJson)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", aid, site_id, tier, freq, minutes, post, rit, show, json.dumps(weights))
             elif kind == "update":
                 self.db.execute("UPDATE dbo.BotAccount SET Strategy=%s,UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s", change["strategy"], aid)
             elif kind == "restore":

@@ -149,4 +149,5 @@ def account_settings(body):
         "run_it_twice_chance": number(body.get("run_it_twice_chance"), 0, 1, "run it twice chance"),
         "rebuy_ring_chance": number(body.get("rebuy_ring_chance"), 0, 1, "ring rebuy chance"),
         "rebuy_tournament_chance": number(body.get("rebuy_tournament_chance"), 0, 1, "tournament rebuy chance"),
+        "show_cards_chance": number(body.get("show_cards_chance"), 0, 1, "show cards chance"),
         "buy_in_weights": normalized}
