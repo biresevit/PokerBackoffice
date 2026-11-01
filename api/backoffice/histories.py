@@ -215,7 +215,15 @@ class Histories:
         payload = container.get_blob_client(path).download_blob(offset=0, length=262145).readall()
         if len(payload) > 262144:
             raise Error(413, "A hand-history file exceeds the supported size")
-        return payload
+        # Files written before PDecision's showdown fix may pay the wrong player; the list,
+        # replay and downloads all show the re-settled winners.
+        from schedule_controller.hand_settlement import correct_winnings
+        bom = payload.startswith(b"\xef\xbb\xbf")
+        text = payload.decode("utf-8-sig")
+        corrected = correct_winnings(text)
+        if corrected == text:
+            return payload
+        return (b"\xef\xbb\xbf" if bom else b"") + corrected.encode("utf-8")
 
     def _container(self):
         """Create one thread-safe Azure client per request, not one per hand."""
