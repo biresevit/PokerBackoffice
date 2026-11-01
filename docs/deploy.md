@@ -23,8 +23,9 @@ The same Python package `ScheduleController/schedule_controller` ships in three 
 | Changed file | Function app (§5) | Backoffice (§6) | PC release (§7) |
 |---|---|---|---|
 | `schedule_controller/cloud_scheduler.py`, `hand_history_results.py`, `function_app.py` | yes | | |
-| `schedule_controller/planner.py`, `rules.py`, `update_rollouts.py` | yes | yes (bundled copy, used by the simulator and updates API) | |
-| `schedule_controller/timeline.py` | | yes | |
+| `schedule_controller/planner.py` | yes | | |
+| `schedule_controller/rules.py`, `update_rollouts.py` | yes | yes (bundled copy, used by the updates API) | |
+| `schedule_controller/hand_settlement.py` | yes | yes (bundled copy, used by the hand-history views) | |
 | `schedule_controller/pilot.py`, `pilot_repository.py`, `manual_worker.py`, `chat_worker.py` | | | yes |
 | `PokerController/poker_controller/*` | | | yes |
 | `PokerBackoffice/api/*`, `frontend/*` | | yes | |
@@ -147,7 +148,7 @@ The function runs `CloudScheduler` every 30 seconds (planning joins and leaves, 
 
 Rollback: redeploy the previous zip from `ScheduleController\artifacts` (they are kept by date and topic).
 
-If the shared files also changed (`planner.py`, `rules.py`, `update_rollouts.py`), deploy the backoffice as well (§6).
+If the bundled shared files also changed (`rules.py`, `update_rollouts.py`, `hand_settlement.py`), deploy the backoffice as well (§6).
 
 ## 6. Backoffice (Static Web App `poker-control-nenad`)
 

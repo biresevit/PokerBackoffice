@@ -12,17 +12,16 @@ Customer-scoped Azure SQL backoffice with a static HTML/JavaScript frontend and 
 - Weekly schedule editing, site stake ranges/percentages, machine capacity and allowed sites.
 - Lobby-style live table cards with total players/bot entries and a database-configured refresh interval. A user may open a ten-minute, per-bot diagnostic window; only the owning machine responds and only the selected hero's hole cards are exposed.
 - Scoped hand-history paging (10/50/100), bot/game/date/blind filters, per-hand hero winnings and human counts, newest/oldest/winnings sorting, all-filtered ZIP downloads, paged bot winnings, and a step-by-step browser replay. Per-player results are calculated once by Azure ingestion and reports are indexed SQL aggregations; opening a replay/download is the only report UI path that reads history blobs.
-- Schedule simulator sharing the real planner: paced reservations, seat confirmation, machine/account limits, session starts/ends, hand-finish delay, replacement joins, cooldown and daily preferences. Simulated accounts/tables are clearly separate from live observations.
 
 ## Local use
 
 ```powershell
 .\.venv\Scripts\python.exe tools/build.py
 .\.venv\Scripts\python.exe tools/preview.py
-# http://127.0.0.1:4280/#simulation
+# http://127.0.0.1:4280/#overview
 ```
 
-The preview binds loopback only and uses customer Nenad (14004), with real Azure SQL data. Editing forms persists changes. The simulator does not write data or take poker actions. The preview's identity injection exists only in this local script; it is not deployed.
+The preview binds loopback only and uses customer Nenad (14004), with real Azure SQL data. Editing forms persists changes. The preview's identity injection exists only in this local script; it is not deployed.
 
 API settings: `BACKOFFICE_SQL_SERVER`, `BACKOFFICE_SQL_DATABASE`, `BACKOFFICE_SQL_USER`, `BACKOFFICE_SQL_PASSWORD`; TLS certificate verification is mandatory. Local provisioning may instead read the existing `SqlConnectionString`. Blob reads use `BACKOFFICE_HH_CONTAINER_URL` (container URL with read-only SAS) or legacy `StorageConnString`; check `histories.py` for the exact supported configuration before provisioning. Never put secrets in frontend files.
 
@@ -46,7 +45,7 @@ Use the subscription that contains `pokerdb`. Create a dedicated resource group 
 swa deploy frontend --api-location api --api-language python --api-version 3.11 --env production
 ```
 
-6. Verify hosted Microsoft login, unauthorized customer rejection, SQL connectivity and simulator. SQL firewall rules must allow the selected hosting environment; private-only SQL would require a different hosting/networking plan.
+6. Verify hosted Microsoft login, unauthorized customer rejection, SQL connectivity and the hand-history replay. SQL firewall rules must allow the selected hosting environment; private-only SQL would require a different hosting/networking plan.
 7. Sign in as the intended **biresevit Microsoft account**, click Request access, then inspect `tools/admin.py requests`. Grant the exact returned subject to Nenad after verifying the identity:
 
 ```powershell
@@ -67,7 +66,7 @@ $env:BACKOFFICE_TEST_SQL='1'
 .\.venv\Scripts\python.exe tools/check_browser.py
 ```
 
-Browser smoke checks use the running loopback preview; artifacts are ignored. The scheduler suite has 49 passing tests including SQL integration. Backoffice has 19 passing tests including rollback SQL mutations and customer isolation, plus a browser test covering all pages and simulation on desktop/mobile.
+Browser smoke checks use the running loopback preview; artifacts are ignored. The scheduler suite has 49 passing tests including SQL integration. Backoffice has 19 passing tests including rollback SQL mutations and customer isolation, plus a browser test covering all pages on desktop/mobile.
 
 ## Remaining live integration
 

@@ -129,7 +129,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|simulation|chat|updates)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
@@ -161,17 +161,6 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 if method=="POST" and len(parts)==2 and parts[1]=='send':
                     return response(chat.send(sid,table_id,body),202)
                 raise Error(404,'Chat endpoint not found')
-            if section == "simulation" and method == "POST" and tail is None:
-                from decimal import Decimal
-                from schedule_controller.rules import Band
-                from schedule_controller.timeline import simulate
-                configuration = store.stakes(sid)
-                bands = [Band(r["tier"], Decimal(str(r["minimum"])), Decimal(str(r["maximum"])),
-                              round(float(r["percent"]) * 100), bool(r["upper_inclusive"])) for r in configuration["bands"]]
-                try:
-                    return response(simulate(body, bands, configuration["currency"]))
-                except (ValueError, TypeError, KeyError) as exc:
-                    raise Error(400, str(exc))
             if section == "histories":
                 hh = Histories(store)
                 if method == "GET" and tail is None:

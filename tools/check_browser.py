@@ -25,7 +25,7 @@ with sync_playwright() as p:
       return colors;
     }""")
     assert board_colors==['rgb(201, 28, 39)','rgb(32, 37, 34)'],board_colors
-    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tasks","Tasks"),("sessions","Sessions"),("tables","Live tables"),("histories","Hand histories"),("simulation","Schedule simulator")]:
+    for name,title in [("accounts","Accounts"),("schedule","Weekly schedule"),("stakes","Stakes"),("machines","Machines"),("tasks","Tasks"),("sessions","Sessions"),("tables","Live tables"),("histories","Hand histories")]:
         page.goto("http://127.0.0.1:4280/#"+name)
         page.get_by_role("heading",name=title,exact=True,level=1).wait_for()
         page.wait_for_timeout(500)
@@ -132,11 +132,6 @@ with sync_playwright() as p:
         if name=="tables":
             assert page.locator('[name="live-game"] option').all_text_contents()==['All games','NLH','PLO4','PLO5']
             assert page.locator('[name="live-type"] option').all_text_contents()==['All types','Ring','SNG','MTT']
-    page.get_by_role("button",name="Run simulation").click()
-    page.get_by_role("heading",name="What happens, and when").wait_for(timeout=30000)
-    assert page.locator("#event-list tbody tr").count()>36
-    assert "Invalid Date" not in page.locator("#sim-output").inner_text()
-    page.screenshot(path=str(OUT/"simulation-desktop.png"),full_page=True)
     page.set_viewport_size({"width":390,"height":844})
     page.wait_for_timeout(400)
     page.get_by_role('button',name='Open navigation').click()
@@ -144,12 +139,14 @@ with sync_playwright() as p:
     page.locator('[data-page="accounts"]').click()
     page.get_by_role('heading',name='Accounts',exact=True).wait_for()
     assert not page.locator('.sidebar.open').count()
-    page.goto('http://127.0.0.1:4280/#simulation')
-    page.get_by_role('button',name='Run simulation').click()
-    page.get_by_role('heading',name='What happens, and when').wait_for()
+    page.goto('http://127.0.0.1:4280/#schedule')
+    page.get_by_role('heading',name='Weekly schedule',exact=True,level=1).wait_for()
     page.wait_for_timeout(400)
-    page.screenshot(path=str(OUT/"simulation-mobile.png"),full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"),"Mobile page overflows"
-    print(json.dumps({"browser_errors":errors,"timeline_rows":page.locator('#event-list tbody tr').count()}))
+    # The removed schedule simulator's old link falls back to the overview.
+    page.goto('http://127.0.0.1:4280/#simulation')
+    page.get_by_role('heading',name='Overview',exact=True,level=1).wait_for()
+    assert not page.locator('[data-page="simulation"]').count()
+    print(json.dumps({"browser_errors":errors}))
     assert not errors
     browser.close()
