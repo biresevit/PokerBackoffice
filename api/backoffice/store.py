@@ -647,9 +647,13 @@ class Store:
         online=sum(1 for machine in machines if machine["online"])
         warnings=[{"machine":m["name"] or f"Machine {m['id']}","message":warning}
                   for m in machines for warning in m["warnings"]]
+        offline_machines=sorted(({"machine":m["name"] or f"Machine {m['id']}","heartbeat":m["heartbeat"]}
+                                 for m in machines if not m["online"]),
+                                key=lambda m:(m["heartbeat"] is not None,m["heartbeat"] or datetime.min))
         return {"site": site, "accounts": accounts["total"], "synthetic_accounts": accounts["synthetic"],
                 "entries": entries, "scheduled_target": scheduled_target(schedule), "machines": machines,
-                "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings},
+                "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings,
+                                   "offline_machines":offline_machines},
                 "hand_histories": history, "schedule": schedule}
 
     def entry_metrics(self, site_id, query):
