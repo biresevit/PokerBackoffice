@@ -1,6 +1,7 @@
 # Poker Control backoffice
 
 **Deploying:** see [docs/deploy.md](docs/deploy.md) for every component of the fleet (migrations, scheduler function, backoffice, PC releases, PDecision), in order.
+
 Customer-scoped Azure SQL backoffice with a static HTML/JavaScript frontend and a Python 3.11 Azure Static Web Apps managed API. Deployed at https://lively-rock-032158003.4.azurestaticapps.net on the Free plan, resource group `poker-backoffice`, in the subscription containing `pokerdb`. Do not deploy this API as an independent public Function App: identity headers are trusted only behind the SWA edge.
 
 ## Included
