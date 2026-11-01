@@ -116,8 +116,8 @@ class ManualTasks:
             if choice=='any':
                 usable=[t for t in usable if session['tier'] in t['tiers']]
                 if not usable:raise Error(409,f"No open {fmt} within the {session['tier']} tier's tournament buy-in range was seen in the last five minutes")
-                # Like the scheduler: SNG with the most players (starts soonest), MTT with the earliest start.
-                table_row=(max(usable,key=lambda t:t['registered']) if fmt=='SNG' else
+                # Like the scheduler: SNG with the fewest free seats (starts soonest), MTT with the earliest start.
+                table_row=(min(usable,key=lambda t:(t['max_players']-t['registered'],-t['registered'])) if fmt=='SNG' else
                            min(usable,key=lambda t:(t['start'],-t['registered'])))
             else:
                 table_row=next((t for t in usable if t['id']==choice),None)
