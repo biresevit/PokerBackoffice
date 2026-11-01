@@ -27,11 +27,15 @@ export function installDistributions({$,esc,siteApi,modal,toast,table,card,navig
   wire();total();
  }
 
- function apply(d){
-  const set=d.fields.filter(f=>f.options.length);
+ // only: apply just this one setting (the row's Apply button); otherwise choose among all defined settings.
+ function apply(d,only=null){
+  const set=d.fields.filter(f=>f.options.length&&(!only||f.field===only));
   if(!set.length){toast('Define a distribution first');return;}
   let preview=null;
-  modal('Apply distributions to existing accounts',`<p>Every ticked setting is reassigned on all ${d.accounts} accounts so that each value gets exactly its share, chosen at random. Settings you don't tick stay as they are.</p><fieldset class="dist-fields">${set.map(f=>`<label class="checkbox-line"><input type="checkbox" name="dist-field" value="${f.field}" checked> ${esc(f.label)} <span class="sub">${summary(f)}</span></label>`).join('')}</fieldset><button type="button" class="button" id="dist-preview">Preview</button><div id="dist-preview-out"></div>`,async()=>{
+  const intro=only
+   ?`<p>${esc(set[0].label)} is reassigned on all ${d.accounts} accounts so that each value gets exactly its share, chosen at random. No other setting changes.</p><span hidden><input type="checkbox" name="dist-field" value="${set[0].field}" checked></span>`
+   :`<p>Every ticked setting is reassigned on all ${d.accounts} accounts so that each value gets exactly its share, chosen at random. Settings you don't tick stay as they are.</p><fieldset class="dist-fields">${set.map(f=>`<label class="checkbox-line"><input type="checkbox" name="dist-field" value="${f.field}" checked> ${esc(f.label)} <span class="sub">${summary(f)}</span></label>`).join('')}</fieldset>`;
+  modal(only?`Apply ${set[0].label} to existing accounts`:'Apply distributions to existing accounts',`${intro}<button type="button" class="button" id="dist-preview" ${only?'hidden':''}>Preview</button><div id="dist-preview-out"></div>`,async()=>{
    const fields=[...document.querySelectorAll('#dialog [name=dist-field]:checked')].map(i=>i.value);
    if(!preview||preview.key!==fields.join())throw Error('Preview the ticked settings first');
    const r=await siteApi('accounts/distributions/apply','POST',{fields,token:preview.token,version:d.version});
@@ -43,15 +47,17 @@ export function installDistributions({$,esc,siteApi,modal,toast,table,card,navig
     $('#dist-preview-out').innerHTML=p.fields.map(f=>{const def=d.fields.find(x=>x.field===f.field);return `<h3 class="dist-preview-title">${esc(f.label)}</h3>`+table(['Value','Share','Accounts'],f.values.map(v=>`<tr><td>${esc(label(def,v.value))}</td><td>${pct(v.percent)}</td><td>${v.accounts}</td></tr>`));}).join('');
    }catch(e){preview=null;$('.dialog-error').textContent=e.message;}
   };
+  if(only)$('#dist-preview').click();
  }
 
  return async function draw(root){
   const d=await siteApi('accounts/distributions');
   root.innerHTML=card('Value distributions',
    `<p class="card-intro">How account settings are spread across your ${d.accounts} accounts. New accounts follow these automatically; existing accounts change only when you apply them.</p>`+
-   table(['Setting','Distribution','Now',''],d.fields.map(f=>`<tr><td><strong>${esc(f.label)}</strong></td><td class="break-word">${summary(f)}</td><td class="break-word muted small">${now(f,d.accounts)}</td><td class="right"><button class="button small edit-action" data-dist="${f.field}">Edit</button></td></tr>`)),
+   table(['Setting','Distribution','Now',''],d.fields.map(f=>`<tr><td><strong>${esc(f.label)}</strong></td><td class="break-word">${summary(f)}</td><td class="break-word muted small">${now(f,d.accounts)}</td><td class="right nowrap"><span class="edit-action dist-actions"><button class="button small" data-dist="${f.field}">Edit</button><button class="button small" data-dist-apply="${f.field}" ${f.options.length?'':'disabled title="Define a distribution first"'}>Apply</button></span></td></tr>`)),
    '<span class="edit-action"><button class="button" id="apply-distributions">Apply to existing accounts…</button></span>');
   root.querySelectorAll('[data-dist]').forEach(b=>b.onclick=()=>editor(d.fields.find(f=>f.field===b.dataset.dist),d.version));
+  root.querySelectorAll('[data-dist-apply]').forEach(b=>b.onclick=()=>apply(d,b.dataset.distApply));
   $('#apply-distributions').onclick=()=>apply(d);
  };
 }
