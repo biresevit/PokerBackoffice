@@ -24,3 +24,13 @@ def test_force_stop_report_marks_the_killed_worker_not_ready():
     agent_request(db, 1, {'x-updater-token': TOKEN}, body, 'report')
     assert any('MachineAssignment SET IsReady=0' in sql and args == (1, 1) for sql, args in db.writes)
     assert any("Status='stopping'" in sql for sql, _ in db.writes)
+
+
+def test_force_stop_keeps_tournament_registrations_open():
+    # EvenBet keeps a tournament registration through the restart; the new worker resumes it or closes it.
+    db = Database()
+    body = {'instance_id': '22222222-2222-2222-2222-222222222222', 'task_id': TASK, 'phase': 'force_stopped'}
+    agent_request(db, 1, {'x-updater-token': TOKEN}, body, 'report')
+    closes = [sql for sql, _ in db.writes if 'UPDATE scheduler.Entry SET IsOpen=0' in sql]
+    assert closes and all("TableId NOT LIKE 'T%%'" in sql for sql in closes)
+    assert any("UPDATE scheduler.Entry SET Status='uncertain'" in sql for sql, _ in db.writes)
