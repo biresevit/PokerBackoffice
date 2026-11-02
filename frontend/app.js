@@ -1,5 +1,5 @@
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
-import {ManualControls} from './manual-controls.js?v=20261101.mobile2';
+import {ManualControls} from './manual-controls.js?v=20261102.tlive1';
 import {installDistributions} from './distributions-ui.js?v=20261101.dist2';
 import {installUpdates} from './updates-ui.js?v=20261101.setup1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
@@ -306,7 +306,7 @@ pages.tables=async gen=>{
 // Lobby-style cards keep the overview inexpensive. Detailed table state starts
 // only after a user explicitly selects one active bot.
 // SNG/MTT lobby rows: buy-in, registrations, start and how many of our bots are in.
-const tournamentCard=t=>`<article class="lobby-table tournament-card"><div class="top"><div><h2>${esc(t.name)}</h2><span>${esc(t.game)} · ${esc(t.table_type)} · ${esc(t.currency)} · buy-in ${Number(t.buy_in)}</span></div>${pill(`${t.bot_entries} bots`,t.bot_entries?'green':'')}</div><div class="table-meta"><strong>${t.occupied}${t.table_type==='SNG'?' / '+t.seats:''} registered</strong><span>${esc(({registering:'Registering',running:'Running',completed:'Finished'})[t.tournament_state]||t.tournament_state||'')}</span></div>${t.start?`<div class="lobby-foot"><span>Starts ${date(t.start)}</span></div>`:''}</article>`;
+const tournamentCard=t=>`<article class="lobby-table tournament-card"><div class="top"><div><h2>${esc(t.name)}</h2><span>${esc(t.game)} · ${esc(t.table_type)} · ${esc(t.currency)} · buy-in ${Number(t.buy_in)}</span></div>${pill(`${t.bot_entries} bots`,t.bot_entries?'green':'')}</div><div class="table-meta"><strong>${t.occupied}${t.table_type==='SNG'?' / '+t.seats:''} registered</strong><span>${esc(({registering:'Registering',running:'Running',completed:'Finished'})[t.tournament_state]||t.tournament_state||'')}</span></div>${t.start?`<div class="lobby-foot"><span>Starts ${date(t.start)}</span></div>`:''}${(t.players||[]).length?`<div class="lobby-foot"><span>${t.players.map(p=>esc(p.username)).join(', ')} playing</span><button class="button small" data-live-table="${esc(t.id)}">Open Live</button></div>`:''}</article>`;
 pages.tables=async gen=>{
  const d=await siteApi('tables');
  if(!render(gen,`Only tables observed during the last 60 seconds are shown. Lobby snapshots refresh every ${d.refresh_seconds} seconds.`,`<div class="live-filters">${select('Game format','live-game',state.tableFilters.game,[['all','All games'],['NLH','NLH'],['PLO4','PLO4'],['PLO5','PLO5']])}${select('Table type','live-type',state.tableFilters.type,[['all','All types'],['RING','Ring'],['SNG','SNG'],['MTT','MTT']])}<span id="live-table-count"></span></div><div id="live-table-results"></div>`))return;

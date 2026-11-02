@@ -438,10 +438,17 @@ class Store:
             ORDER BY t.BigBlind,t.TableName""", site_id)
         for row in rows:
             if row["table_type"] in ("SNG", "MTT"):
-                # A tournament row has no seats; count our bots registered in or playing it.
-                row["players"] = []
+                # A tournament row has no seats; count our bots registered in or playing it, and list
+                # the ones the tournament seated (they can be watched live).
                 row["bot_entries"] = self.db.one("""SELECT COUNT(*) AS n FROM scheduler.Entry
                     WHERE SiteId=%s AND TableId=%s AND IsOpen=1""", site_id, row["id"])["n"]
+                row["players"] = self.db.rows("""SELECT b.Username AS username,e.BotAccountId AS account_id,
+                    e.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,e.PlayTableId AS play_table
+                    FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+                    LEFT JOIN dbo.CustomerMachine m ON m.MachineId=e.MachineId
+                    LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=e.MachineId
+                    WHERE e.SiteId=%s AND e.TableId=%s AND e.IsOpen=1 AND e.Status='seated' ORDER BY b.Username""",
+                    site_id, row["id"])
                 continue
             row["players"] = self.db.rows("""SELECT s.SeatIndex AS seat,s.Username AS username,s.Stack AS stack,
                 s.CurrentBet AS bet,s.InGame AS in_game,s.SittingOut AS sitting_out,ra.AccountId AS account_id,
