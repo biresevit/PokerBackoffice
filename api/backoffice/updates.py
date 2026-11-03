@@ -32,7 +32,8 @@ class Updates:
         releases=self.db.rows("SELECT ReleaseId AS id,Label AS label,PDecisionVersion AS pdecision_version,PokerControllerVersion AS poker_controller_version,PublishedUtc AS published,BootstrapUrl AS bootstrap_url FROM scheduler.UpdateRelease WHERE Enabled=1 ORDER BY PublishedUtc DESC")
         machines=self.db.rows("""SELECT a.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,
             g.LastHeartbeatUtc AS agent_heartbeat,g.CurrentReleaseId AS installed_release,v.Label AS installed_label,g.AgentVersion AS agent_version,g.AppsHealthy AS apps_healthy,g.Stage AS stage,
-            a.LastHeartbeatUtc AS worker_heartbeat,a.IsReady AS worker_ready
+            a.LastHeartbeatUtc AS worker_heartbeat,a.IsReady AS worker_ready,
+            g.LogCollectorVersion AS log_collector_version,g.LogCollectorHeartbeatUtc AS log_collector_heartbeat
             FROM scheduler.MachineAssignment a JOIN dbo.CustomerMachine m ON m.MachineId=a.MachineId
             LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=a.MachineId
             LEFT JOIN scheduler.MachineUpdateAgent g ON g.MachineId=a.MachineId AND g.Enabled=1
@@ -148,6 +149,9 @@ def machine_status(db,machine_id,headers,*,verified_device=False):
 
 
 def agent_request(db,machine_id,headers,body,action):
+    if action in ('logs-poll','logs-report'):
+        from .machine_logs import collector_request
+        return collector_request(db,machine_id,headers,body,action)
     if action=='status':return machine_status(db,machine_id,headers)
     token=headers.get('x-updater-token','')
     if len(token)<40 or len(token)>200:raise Error(401,'Invalid updater credentials')

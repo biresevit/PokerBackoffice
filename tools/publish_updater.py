@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'api'))
 from backoffice.db import session
 
-p=argparse.ArgumentParser();p.add_argument('--version',required=True);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--setup-version');args=p.parse_args()
 if not all(c.isdigit() or c=='.' for c in args.version):raise SystemExit('Invalid version')
 source=ROOT.parent/'PokerController/artifacts/updater-agent'
 output=ROOT/'artifacts/releases'/('updater-'+args.version+'.zip')
@@ -22,3 +22,13 @@ with output.open('rb') as stream:blob.upload_blob(stream,overwrite=False,content
 sas=generate_blob_sas(service.account_name,'client-releases',blob.blob_name,account_key=values['AccountKey'],permission=BlobSasPermissions(read=True),expiry=datetime.now(timezone.utc)+timedelta(days=365),start=datetime.now(timezone.utc)-timedelta(minutes=5),protocol='https')
 with session() as db:db.execute('UPDATE scheduler.UpdateRelease SET BootstrapUrl=%s WHERE Enabled=1',blob.url+'?'+sas)
 print('Updater installer published:',args.version)
+if args.setup_version:
+ if not all(c.isdigit() or c=='.' for c in args.setup_version):raise SystemExit('Invalid setup version')
+ from configure_azure import arm,RESOURCE
+ setup=ROOT.parent/'PokerController/artifacts/setup/PokerSuite.Setup.exe'
+ target=service.get_blob_client('client-releases','setups/PokerSuite.Setup-'+args.setup_version+'.exe')
+ with setup.open('rb') as f:target.upload_blob(f,overwrite=False,content_settings=ContentSettings(content_type='application/octet-stream',content_disposition='attachment; filename="PokerSuite.Setup.exe"'))
+ setup_sas=generate_blob_sas(service.account_name,'client-releases',target.blob_name,account_key=values['AccountKey'],permission=BlobSasPermissions(read=True),expiry=datetime.now(timezone.utc)+timedelta(days=365),protocol='https')
+ settings=arm('POST',RESOURCE+'/listAppSettings')['properties'];settings['BACKOFFICE_SETUP_URL']=target.url+'?'+setup_sas
+ arm('PUT',RESOURCE+'/config/appsettings',{'properties':settings})
+ print('Setup published:',args.setup_version)

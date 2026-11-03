@@ -84,7 +84,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             from .pairing import public_request
             with session_factory() as db:
                 return response(public_request(db,setup[1],setup_body,headers.get('x-forwarded-for','unknown').split(',')[0].strip()))
-        updater=re.fullmatch(r"/api/updater/(\d+)/(poll|report|status)",request.path)
+        updater=re.fullmatch(r"/api/updater/(\d+)/(poll|report|status|logs-poll|logs-report)",request.path)
         if updater:
             if request.method!='POST':raise Error(405,'Method not allowed')
             if len(request.body)>32768:raise Error(413,'Request is too large')
@@ -136,6 +136,14 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             # Scope checked before any resource-specific query (including downloads).
             store.site(sid)
             method = request.method
+            logs=re.fullmatch(r'(\d+)/logs(?:/([0-9a-fA-F-]+)/download)?',tail or '') if section=='machines' else None
+            if logs:
+                from .machine_logs import MachineLogs
+                service=MachineLogs(store);mid=int(logs[1])
+                if method=='GET' and logs[2]:return response(service.download(sid,mid,logs[2]))
+                if method=='GET' and not logs[2]:return response(service.list(sid,mid))
+                if method=='POST' and not logs[2]:return response(service.create(sid,mid,body),202)
+                raise Error(405,'Method not allowed')
             if section == 'settings':
                 from .casino_settings import CasinoSettings
                 settings=CasinoSettings(store)

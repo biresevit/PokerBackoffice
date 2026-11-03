@@ -24,9 +24,9 @@ def az(*args):
     return json.loads(result.stdout)
 
 
-def arm(method,path,body=None):
+def arm(method,path,body=None,api_version="2024-11-01"):
     token=az("account","get-access-token","--subscription",SUB)["accessToken"]
-    req=urllib.request.Request("https://management.azure.com"+path+"?api-version=2024-11-01",
+    req=urllib.request.Request("https://management.azure.com"+path+"?api-version="+api_version,
         data=None if body is None else json.dumps(body).encode(),method=method,
         headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"})
     with urllib.request.urlopen(req,timeout=90) as response:
@@ -48,6 +48,7 @@ def main():
         permissions={
             "dbo.Customer":"SELECT","dbo.CustomerMachine":"SELECT","dbo.CustomerHandHistory":"SELECT",
             "dbo.CasinoSettings":"SELECT,INSERT,UPDATE",
+            "backoffice.MachineLogRequest":"SELECT,INSERT,UPDATE",
             "reporting.HandProcessing":"SELECT","reporting.HandPlayerResult":"SELECT",
             "dbo.BotAccount":"SELECT,INSERT,UPDATE","backoffice.Membership":"SELECT",
             "backoffice.AccessRequest":"SELECT,INSERT","backoffice.AuditLog":"SELECT,INSERT",
