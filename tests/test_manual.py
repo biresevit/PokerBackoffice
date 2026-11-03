@@ -80,6 +80,42 @@ def test_valid_action_is_queued_for_exact_hero_and_turn():
     assert db.writes[0][1][-3:]==('a'*64,'raise',500)
 
 
+def tournament_service():
+    m,db=service();db.row['TableId']='T123'
+    payload=json.loads(db.row['PayloadJson'])
+    payload.update(table_id='42',tournament=True,amount_unit='tournament_chips')
+    payload['manual']['amount_scale']=1
+    db.row['PayloadJson']=json.dumps(payload)
+    return m,db
+
+
+def test_tournament_control_and_action_use_the_playing_table_and_native_chips():
+    m,db=tournament_service()
+    m.mode(1,db.request,{'enabled':True,'amount_unit':'tournament_chips'})
+    assert db.writes[0][1][-1]=='42' # Control keys are numeric playing-table IDs, not T123.
+    db.writes=[]
+    m.action(1,db.request,{'turn_key':'a'*64,'action':'raise','amount':'600','amount_unit':'tournament_chips'})
+    args=db.writes[0][1]
+    assert args[4]=='42' and args[-1]==600
+
+
+@pytest.mark.parametrize('problem',['fraction','moved','old_worker'])
+def test_tournament_control_rejects_fractional_chips_and_closed_or_legacy_views(problem):
+    m,db=tournament_service();body={'turn_key':'a'*64,'action':'raise','amount':'600','amount_unit':'tournament_chips'}
+    if problem=='fraction':body['amount']='600.5'
+    if problem=='moved':db.row['Status']='failed'
+    if problem=='old_worker':manual_payload(db,amount_scale=100)
+    with pytest.raises(Error):m.action(1,db.request,body)
+    assert not db.writes
+
+
+def test_old_live_window_cannot_enable_tournament_control_without_chip_unit_support():
+    m,db=tournament_service()
+    with pytest.raises(Error,match='Refresh this live window'):
+        m.mode(1,db.request,{'enabled':True})
+    assert not db.writes
+
+
 def manual_payload(db,**fields):
     p=json.loads(db.row['PayloadJson']);p['manual'].update(fields);db.row['PayloadJson']=json.dumps(p)
 
