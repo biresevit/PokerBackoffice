@@ -41,13 +41,16 @@ class MachineLogs:
         return self._blobs
     def machine(self,sid,mid):
         self.store.site(sid)
-        row=self.db.one('''SELECT m.MachineId FROM dbo.CustomerMachine m JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+        row=self.db.one('''SELECT m.MachineId,g.LogCollectorVersion,g.LogCollectorHeartbeatUtc FROM dbo.CustomerMachine m JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+            LEFT JOIN scheduler.MachineUpdateAgent g ON g.MachineId=m.MachineId
             WHERE m.MachineId=%s AND m.CustomerId=%s AND a.SiteId=%s AND m.IsActive=1''',mid,self.store.ctx.customer_id,sid)
         if not row:raise Error(404,'Machine not found')
+        return row
     def list(self,sid,mid):
-        self.machine(sid,mid)
+        machine=self.machine(sid,mid)
         self.db.execute("UPDATE backoffice.MachineLogRequest SET Status='expired' WHERE MachineId=%s AND ExpiresUtc<=SYSUTCDATETIME() AND Status<>'expired'",mid)
-        return {'items':self.db.rows('''SELECT TOP(30) RequestId AS id,Status AS status,Hours AS hours,CreatedUtc AS created,
+        return {'collector_version':machine.get('LogCollectorVersion'),'collector_heartbeat':machine.get('LogCollectorHeartbeatUtc'),
+            'items':self.db.rows('''SELECT TOP(30) RequestId AS id,Status AS status,Hours AS hours,CreatedUtc AS created,
             ExpiresUtc AS expires,SizeBytes AS size_bytes,Detail AS detail FROM backoffice.MachineLogRequest
             WHERE SiteId=%s AND MachineId=%s AND CustomerId=%s ORDER BY CreatedUtc DESC''',sid,mid,self.store.ctx.customer_id)}
     def create(self,sid,mid,body):

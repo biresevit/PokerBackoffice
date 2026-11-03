@@ -9,8 +9,8 @@ export function installMachineLogs({$,esc,state,pages,render,siteApi,date,pill,t
    const requestMid=mid;
    try{
     const d=await siteApi(`machines/${mid}/logs`);if(!current()||requestMid!==mid)return;
-    const m=data.machines.find(m=>m.id===mid),heartbeat=m?.log_collector_heartbeat;
-    $('#logs-capability').textContent=heartbeat?`Collector ${m.log_collector_version} last connected ${date(heartbeat)}.`:'Waiting for a diagnostic collector. PCs receive it with the new signed worker release or updater 1.0.14 and later. Requests wait until the collector connects.';
+    const heartbeat=d.collector_heartbeat;
+    $('#logs-capability').textContent=heartbeat?`Collector ${d.collector_version} last connected ${date(heartbeat)}.`:'Waiting for a diagnostic collector. PCs receive it with the new signed worker release or updater 1.0.14 and later. Requests wait until the collector connects.';
     $('#logs-history').innerHTML=d.items.length?`<div class="table-wrap"><table><thead><tr><th>Requested</th><th>History</th><th>Status</th><th>Details</th><th>Download</th></tr></thead><tbody>${d.items.map(r=>`<tr><td>${date(r.created)}</td><td>${r.hours} hours</td><td>${pill(r.status,r.status==='ready'?'green':r.status==='failed'?'red':'blue')}</td><td>${esc(r.detail||'Waiting for the PC to collect logs.')}${r.size_bytes?` · ${(r.size_bytes/1048576).toFixed(1)} MB`:''}</td><td>${r.status==='ready'?`<button class="button small" data-log-download="${esc(r.id)}">Download ZIP</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<p class="card-body">No log requests for this machine.</p>';
     document.querySelectorAll('[data-log-download]').forEach(button=>button.onclick=async()=>{try{const d=await siteApi(`machines/${mid}/logs/${button.dataset.logDownload}/download`);const a=document.createElement('a');a.href=d.url;a.rel='noopener';a.download=d.filename;a.click();}catch(e){$('#logs-error').textContent=e.message;}});
    }catch(e){if(current())$('#logs-error').textContent=e.message;}
