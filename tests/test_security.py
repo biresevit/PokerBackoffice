@@ -93,6 +93,7 @@ def test_live_tables_query_excludes_observations_older_than_60_seconds():
     result = Store(db, Context(14004,"test","subject","operator")).tables(1)
     assert result["items"] == []
     assert "t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())" in db.lobby_sql
+    assert "t.TournamentState IN ('registering','running')" in db.lobby_sql
 
 
 def test_live_table_bot_count_comes_from_current_seats_not_open_entries():

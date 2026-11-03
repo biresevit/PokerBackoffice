@@ -435,6 +435,7 @@ class Store:
             t.TournamentState AS tournament_state
             FROM scheduler.LobbyTable t
             WHERE t.SiteId=%s
+              AND (t.TableType='RING' OR t.TournamentState IN ('registering','running'))
               AND t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
               AND (t.TableType IN ('SNG','MTT') OR t.FullSnapshotUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME()))
               AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment o WHERE o.SiteId=t.SiteId AND o.MachineId=t.ObserverMachineId AND o.WorkerEpoch=t.ObserverEpoch AND o.IsReady=1 AND o.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()))
