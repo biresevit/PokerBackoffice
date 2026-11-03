@@ -47,6 +47,7 @@ def main():
             raise RuntimeError("Application SQL user exists without matching Azure settings; reconcile before rotation")
         permissions={
             "dbo.Customer":"SELECT","dbo.CustomerMachine":"SELECT","dbo.CustomerHandHistory":"SELECT",
+            "dbo.CasinoSettings":"SELECT,INSERT,UPDATE",
             "reporting.HandProcessing":"SELECT","reporting.HandPlayerResult":"SELECT",
             "dbo.BotAccount":"SELECT,INSERT,UPDATE","backoffice.Membership":"SELECT",
             "backoffice.AccessRequest":"SELECT,INSERT","backoffice.AuditLog":"SELECT,INSERT",

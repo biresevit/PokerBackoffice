@@ -4,6 +4,7 @@ import {ManualControls} from './manual-controls.js?v=20261103.tmanual1';
 import {installDistributions} from './distributions-ui.js?v=20261101.dist2';
 import {installUpdates} from './updates-ui.js?v=20261101.setup1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
+import {installCasinoSettings} from './casino-settings.js?v=20261103.settings1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const names = {overview:'Overview', accounts:'Accounts', schedule:'Weekly schedule', tables:'Live tables', chat:'Chat', tasks:'Tasks', sessions:'Sessions', stakes:'Stakes', machines:'Machines', updates:'Updates', histories:'Hand histories', winnings:'Winnings'};
@@ -147,6 +148,9 @@ function render(gen,description,body,actions=''){
   $('#workspace').innerHTML=`<div class="page-heading"><div><h1>${names[state.page]}</h1><p>${description}</p></div><div class="actions">${actions}</div></div>${body}`;return true;
 }
 const pages={};
+names.settings='Strategy settings';symbols.settings='⚙';
+navGroups.find(g=>g[0]==='Setup')[1].push('settings');
+installCasinoSettings({$,esc,state,pages,render,siteApi,toast,select});
 const overviewFormats=[['RING','Ring entries'],['SNG','SNG bots'],['MTT','MTT bots']];
 // Ring: confirmed seated entries against the target. SNG/MTT: bots registered in or playing tournaments,
 // the quantity the tournament target schedules.

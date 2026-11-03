@@ -129,13 +129,19 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
             # Scope checked before any resource-specific query (including downloads).
             store.site(sid)
             method = request.method
+            if section == 'settings':
+                from .casino_settings import CasinoSettings
+                settings=CasinoSettings(store)
+                if method=='GET' and tail is None:return response(settings.get(sid))
+                if method=='PUT' and tail is None:return response(settings.save(sid,body))
+                raise Error(405,'Method not allowed')
             if section == "updates":
                 from .updates import Updates
                 updates=Updates(store)
