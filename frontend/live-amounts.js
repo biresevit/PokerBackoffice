@@ -1,7 +1,7 @@
-// Worker snapshots use cash-table units (raw protocol amounts / 100).
-// Tournament protocol amounts are chips; restore those units for display only.
+// Older workers send tournament chips / 100. New workers identify native chip
+// snapshots explicitly, so a mixed fleet never rescales those chips a second time.
 export function liveDisplaySnapshot(payload){
- if(!payload.tournament)return payload;
+ if(!payload.tournament||payload.amount_unit==='tournament_chips')return payload;
  const chips=value=>Math.round(Number(value||0)*100);
  return {...payload,pot:chips(payload.pot),big_blind:chips(payload.big_blind),
   seats:payload.seats.map(seat=>({...seat,stack:chips(seat.stack),bet:chips(seat.bet)})),

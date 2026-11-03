@@ -1,4 +1,4 @@
-import {liveDisplaySnapshot,formatLiveAmount} from './live-amounts.js?v=20261103.chips1';
+import {liveDisplaySnapshot,formatLiveAmount} from './live-amounts.js?v=20261103.nativechips1';
 import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261030.schedule2';
 import {ManualControls} from './manual-controls.js?v=20261102.tlive1';
 import {installDistributions} from './distributions-ui.js?v=20261101.dist2';

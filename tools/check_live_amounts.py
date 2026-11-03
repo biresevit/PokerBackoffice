@@ -43,8 +43,24 @@ with sync_playwright() as p:
       const p={tournament:true,pot:.29,seats:[{stack:10,bet:.5}],manual:{pot_minor:29}};
       const a=liveDisplaySnapshot(p),b=liveDisplaySnapshot(p);
       if(a.pot!==29||b.pot!==29||p.pot!==.29||p.seats[0].stack!==10||a.manual!==p.manual)throw Error('Snapshot was mutated');
+      const native={...a,amount_unit:'tournament_chips'};
+      if(liveDisplaySnapshot(native)!==native||liveDisplaySnapshot(native).seats[0].stack!==1000)throw Error('Native chips rescaled twice');
     }""")
+    # The same display must work while old and new workers coexist in a rollout.
+    payload.update(amount_unit='tournament_chips',pot=750,big_blind=100)
+    payload['seats'][0].update(stack=1000,bet=50)
+    payload['seats'][1].update(stack=900,bet=100)
+    payload['result']['winners'][0]['amount']=250
+    page.reload();page.locator('.replay-seat').first.wait_for()
+    assert page.locator('.replay-seat[data-seat="0"] > span').inner_text()=='1,000'
+    assert page.locator('.table-bet[data-seat="1"]').inner_text()=='100'
+    assert page.locator('.replay-center > strong').inner_text()=='Pot 750'
+    assert 'john wins 250' in page.locator('.hand-result').inner_text()
     payload['tournament']=False
+    payload.update(amount_unit='currency',pot=7.5,big_blind=1)
+    payload['seats'][0].update(stack=10,bet=.5)
+    payload['seats'][1].update(stack=9,bet=1)
+    payload['result']['winners'][0]['amount']=2.5
     page.reload();page.locator('.replay-seat').first.wait_for()
     assert page.locator('.replay-seat[data-seat="0"] > span').inner_text()=='10.00'
     assert page.locator('.table-bet[data-seat="0"]').inner_text()=='0.50'
