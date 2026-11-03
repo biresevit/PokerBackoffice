@@ -61,6 +61,9 @@ def task_result_description(row):
     descriptions={
         "target_reduced":"Join cancelled because the scheduled entry target was reduced; this table entry was no longer needed.",
         "ValueError":"The task failed validation. The original worker did not record the specific reason.",
+        "KeyError":"The worker could not find expected table or response data. This older worker did not record which field or table was missing.",
+        "join_failure_limit":"Session ended after two failed table joins or tournament registrations; remaining joins were cancelled.",
+        "session_ended":"The session has ended; no new join or tournament registration was attempted.",
         "TimeoutError":"The task timed out while waiting for a response or confirmation.",
         "ConnectionError":"The task could not complete because the connection failed.",
         "ProtocolError":"The task failed while communicating with the poker site. No detailed reason was recorded.",

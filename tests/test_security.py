@@ -197,6 +197,8 @@ def test_task_result_descriptions_explain_cancellations_and_missing_details():
     assert "target was reduced" in task_result_description({"result_code":"target_reduced"})
     assert "did not record" in task_result_description({"result_code":"ValueError"})
     assert task_result_description({"result_code":"ValueError","result_text":"Insufficient balance"})=="Insufficient balance"
+    assert 'expected table or response data' in task_result_description({'result_code':'KeyError'})
+    assert 'two failed' in task_result_description({'result_code':'join_failure_limit'})
 
 
 def test_entry_chart_preserves_exact_changes_and_schedule_boundaries():
