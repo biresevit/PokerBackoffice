@@ -7,13 +7,11 @@ export function quoteMail(form){
  const body=[
   'Hello PokerFill,','',
   'I would like to discuss my requirements and receive a custom quote.','',
-  `Contact: ${value('contact_name')}`,
-  `Work email: ${value('contact_email')}`,
-  `Poker site / company: ${value('site')}`,
-  `Platform / software: ${value('platform')}`,
+  `Email: ${value('contact_email')}`,
+  `Poker site: ${value('site')||'Not provided'}`,
   `Estimated bots needed: ${value('bots')}`,
   `Game formats: ${games.join(', ')}`,
-  `Preferred stakes: ${value('stakes')||'To discuss'}`,
+  `Preferred testing start: ${value('preferred_start')?value('preferred_start').replace('T',' ')+' ('+Intl.DateTimeFormat().resolvedOptions().timeZone+')':'To discuss'}`,
   `Interested in the one-month free trial: ${data.has('trial')?'Yes':'Not at this stage'}`,
   '', 'Traffic plan, timezone and other requirements:', value('notes')||'To discuss',
   '', 'I understand the trial is subject to compatibility review and that I provide and fund the bot accounts.'
@@ -27,6 +25,8 @@ if(form){
  const link=document.querySelector('#quote-email-draft');
  const button=form.querySelector('[type="submit"]');
  const buttonText=button.textContent;
+ const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+ document.querySelector('#quote-timezone').textContent=`Time zone: ${timezone}. We’ll confirm availability with you.`;
  form.addEventListener('input',()=>{status.hidden=true;link.hidden=true;error.hidden=true;});
  form.addEventListener('submit',async event=>{
   event.preventDefault();
@@ -36,6 +36,7 @@ if(form){
   const values=new FormData(form);
   const payload=Object.fromEntries(values);
   payload.games=values.getAll('games');payload.trial=values.has('trial');
+  payload.timezone=timezone;
   error.hidden=true;link.hidden=true;status.hidden=false;
   status.textContent='Sending your enquiry…';
   button.disabled=true;button.textContent='Sending…';form.setAttribute('aria-busy','true');

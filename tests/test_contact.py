@@ -11,9 +11,9 @@ from backoffice.validation import Error
 
 HEADERS = {'content-type': 'application/json', 'x-requested-with': 'PokerFill',
            'origin': 'https://pokerfill.com', 'x-forwarded-for': '192.0.2.1'}
-DATA = dict(contact_name='Test operator', contact_email='operator@example.com',
-            site='Example Poker', platform='Evenbet', bots='100', games=['SNG', 'MTT'],
-            trial=True, notes='Evening traffic', stakes='1 / 2', website='')
+DATA = dict(contact_email='operator@example.com', site='Example Poker',
+            bots='100', games=['SNG', 'MTT'], trial=True, notes='Evening traffic',
+            preferred_start='2026-12-01T14:30', timezone='Europe/Budapest', website='')
 
 
 def test_email_uses_fixed_recipient_and_visitor_reply_to(monkeypatch):
@@ -32,13 +32,17 @@ def test_email_uses_fixed_recipient_and_visitor_reply_to(monkeypatch):
     assert call.kwargs == {'from_addr': contact.MAILBOX, 'to_addrs': [contact.MAILBOX]}
     assert 'Game formats: SNG, MTT' in message.get_content()
     assert 'free trial: Yes' in message.get_content()
+    assert '2026-12-01 14:30 (Europe/Budapest)' in message.get_content()
+    assert 'Contact:' not in message.get_content() and 'Preferred stakes:' not in message.get_content()
 
 
 @pytest.mark.parametrize('patch', [
     {'contact_email': 'x@example.com\r\nBcc:other@example.com'}, {'contact_email': 'invalid'},
-    {'contact_name': ''}, {'notes': 'x'*1501}, {'bots': 0}, {'bots': True},
+    {'contact_email': ''}, {'notes': 'x'*1501}, {'bots': 0}, {'bots': True},
     {'bots': 100001}, {'games': []}, {'games': ['Cash games', 'other']},
-    {'games': ['MTT', 'MTT']}, {'games': [{}]}, {'trial': 'yes'}])
+    {'games': ['MTT', 'MTT']}, {'games': [{}]}, {'trial': 'yes'},
+    {'preferred_start': '2026-02-30T14:30'}, {'preferred_start': 'tomorrow'},
+    {'timezone': 'Unknown/Zone'}, {'timezone': ''}])
 def test_invalid_input_rejected(patch):
     with pytest.raises(Error) as error:
         contact.parse_enquiry(json.dumps(dict(DATA, **patch)).encode(), HEADERS)
@@ -50,6 +54,13 @@ def test_invalid_input_rejected(patch):
 def test_cross_origin_requests_rejected(patch):
     result = handle(Request('POST', '/api/contact', dict(HEADERS, **patch), body=json.dumps(DATA).encode()))
     assert result.status == 403
+
+
+def test_private_enquiry_needs_no_name_site_platform_stakes_or_start():
+    data = {'contact_email': 'private@example.com', 'bots': '20', 'games': ['Cash games'], 'trial': True}
+    parsed = contact.parse_enquiry(json.dumps(data).encode(), HEADERS)
+    assert parsed['site'] == '' and parsed['preferred_start'] == ''
+    assert not {'contact_name', 'platform', 'stakes'} & parsed.keys()
 
 
 def test_public_route_needs_no_identity_and_commits_limit_before_smtp(monkeypatch):

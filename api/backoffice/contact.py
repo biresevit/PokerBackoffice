@@ -12,6 +12,7 @@ import ssl
 import certifi
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .validation import Error
 
@@ -39,9 +40,8 @@ def parse_enquiry(raw, headers):
     if data.get('website'):
         return None
     fields = {}
-    for name, limit, required in [('contact_name', 100, True), ('contact_email', 150, True),
-            ('site', 120, True), ('platform', 100, True), ('stakes', 120, False),
-            ('notes', 1500, False)]:
+    for name, limit, required in [('contact_email', 150, True), ('site', 120, False),
+            ('preferred_start', 16, False), ('timezone', 80, False), ('notes', 1500, False)]:
         value = data.get(name, '')
         if not isinstance(value, str) or len(value) > limit or (required and not value.strip()):
             raise Error(400, 'Please check the required fields and their lengths.')
@@ -51,6 +51,14 @@ def parse_enquiry(raw, headers):
     email = fields['contact_email']
     if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}", email):
         raise Error(400, 'Please enter a valid email address.')
+    if fields['preferred_start']:
+        try:
+            datetime.strptime(fields['preferred_start'], '%Y-%m-%dT%H:%M')
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', fields['preferred_start']):
+                raise ValueError()
+            ZoneInfo(fields['timezone'])
+        except (ValueError, ZoneInfoNotFoundError):
+            raise Error(400, 'Please enter a valid testing date, time and time zone.')
     bots = data.get('bots')
     if isinstance(bots, bool) or not re.fullmatch(r'[0-9]{1,6}', str(bots)) or not 1 <= int(bots) <= 100000:
         raise Error(400, 'Enter a bot count between 1 and 100,000.')
@@ -101,10 +109,10 @@ def send_enquiry(data, password):
     message['Subject'] = 'PokerFill quote and trial enquiry'
     message.set_content('\n'.join([
         'A new enquiry was submitted on the PokerFill website.', '',
-        f"Contact: {data['contact_name']}", f"Work email: {data['contact_email']}",
-        f"Poker site / company: {data['site']}", f"Platform / software: {data['platform']}",
+        f"Email: {data['contact_email']}", f"Poker site: {data['site'] or 'Not provided'}",
         f"Estimated bots needed: {data['bots']}", f"Game formats: {', '.join(data['games'])}",
-        f"Preferred stakes: {data['stakes'] or 'To discuss'}",
+        'Preferred testing start: '+(data['preferred_start'].replace('T', ' ')+
+            ' ('+data['timezone']+')' if data['preferred_start'] else 'To discuss'),
         f"Interested in the one-month free trial: {'Yes' if data['trial'] else 'Not at this stage'}",
         '', 'Traffic plan, timezone and other requirements:', data['notes'] or 'To discuss', '',
         'Trial terms shown to the visitor: compatibility review required; operator provides and funds bot accounts.'

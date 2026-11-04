@@ -44,6 +44,17 @@ Software pricing is quoted individually after reviewing the customer's platform,
 bot count, games, stakes and traffic requirements. There is no public software
 price list. The existing MTT amounts illustrate a prize pool, not software fees.
 
+The enquiry form requires only an email address, bot count and game formats.
+It does not ask for a name, company, platform or stakes. Poker site and preferred
+testing start date/time are optional. The browser displays its IANA time zone
+and submits it with the local date/time, so enquiries and fallback email drafts
+identify the intended time zone. A preferred date is a request, not a booking.
+
+The game-support section explains: NLH uses a live postflop solver and supports
+cash games, SNG and MTT; PLO4 uses saved solver ranges for cash games; PLO5 has
+the least advanced strategy of the three and supports cash games. SNG/MTT are
+NLH only. Straddle, ante and run it twice are supported; double-board games are not.
+
 The approved offer is one month free after compatibility review. The operator
 provides the bot accounts and funds their balances; trial scope and start date
 are agreed before launch. Onboarding explains account preparation, importing
