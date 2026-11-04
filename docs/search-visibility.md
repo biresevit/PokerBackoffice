@@ -37,6 +37,13 @@ a global custom-domain redirect that would redirect agent POST requests.
 
 ## Next actions requiring the owner's accounts
 
+The owner's URL-prefix property `https://pokerfill.com/` uses the public
+`google-site-verification` meta tag in `frontend/index.html`. Keep this tag in
+place after verification. The owner must click Verify in the HTML tag panel;
+publication alone does not confirm Search Console ownership or indexing.
+The URL-prefix property can be used to submit the sitemap and request indexing.
+The Domain property below remains an optional way to consolidate all hosts.
+
 1. Open Google Search Console and add a Domain property for `pokerfill.com`.
    Copy its generated TXT record into Namecheap Advanced DNS (host `@`), keeping
    the Azure validation and email records. Verify ownership.
