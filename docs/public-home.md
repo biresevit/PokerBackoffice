@@ -25,4 +25,3 @@ Public brand: **PokerFill**. Selected domain: `pokerfill.com`. Planned demo
 mailbox: `hello@pokerfill.com`. Registration, DNS and mailbox provisioning are
 still required. Keep the existing platform links until the mailbox can receive
 enquiries.
-
