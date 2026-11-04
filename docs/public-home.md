@@ -37,9 +37,28 @@ dialog zoom and keyboard navigation, mobile widths, sign-in and old workspace
 links. `tools/check_live_cards.py` verifies live windows
 through the root URL redirect. Deploy using the existing `tools/deploy.py`.
 
+## Quotes, trial and onboarding
+
+Software pricing is quoted individually after reviewing the customer's platform,
+bot count, games, stakes and traffic requirements. There is no public software
+price list. The existing MTT amounts illustrate a prize pool, not software fees.
+
+The approved offer is one month free after compatibility review. The operator
+provides the bot accounts and funds their balances; trial scope and start date
+are agreed before launch. Onboarding explains account preparation, importing
+usernames, configuring profiles and schedules, and evaluating the setup.
+`frontend/bot-account-template.csv` matches the real backoffice CSV importer:
+usernames and optional profile names, with no balance-transfer functionality.
+
+`home-contact.js` composes an email draft to `support@pokerfill.com` from the
+public quote form. It opens the visitor's email app; the visitor reviews and
+sends the draft. There is no form-submission API, server email service or stored
+contact data. `tools/check_home_quote.py` checks validation, email composition,
+trial selection, CSV compatibility and mobile layout without sending email.
+
 ## Selected domain
 
-Public brand: **PokerFill**. Selected domain: `pokerfill.com`. Planned demo
-mailbox: `hello@pokerfill.com`. Registration, DNS and mailbox provisioning are
-still required. Keep the existing platform links until the mailbox can receive
-enquiries.
+Public brand: **PokerFill**. Selected domain: `pokerfill.com`. Quote/contact
+mailbox: `support@pokerfill.com`. The operator requested the completed UI using
+this address before mailbox activation. Domain/DNS and mailbox provisioning
+must be completed before receiving real enquiries there.
