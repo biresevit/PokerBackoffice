@@ -18,36 +18,3 @@ document.querySelectorAll('[data-mtt-bots]').forEach(button=>button.addEventList
  document.querySelector('[data-mtt-funding]').textContent=money(bots*10);
  document.querySelector('[data-mtt-count]').textContent=bots;
 }));
-
-const tabs=[...document.querySelectorAll('[data-tour-tab]')];
-function selectTab(tab){
- tabs.forEach(other=>{const selected=other===tab;other.setAttribute('aria-selected',String(selected));other.tabIndex=selected?0:-1;document.getElementById(other.getAttribute('aria-controls')).hidden=!selected;});
-}
-tabs.forEach((tab,index)=>{
- tab.addEventListener('click',()=>selectTab(tab));
- tab.addEventListener('keydown',event=>{
-  let next;
-  if(event.key==='ArrowRight')next=(index+1)%tabs.length;
-  if(event.key==='ArrowLeft')next=(index-1+tabs.length)%tabs.length;
-  if(event.key==='Home')next=0;
-  if(event.key==='End')next=tabs.length-1;
-  if(next!==undefined){event.preventDefault();selectTab(tabs[next]);tabs[next].focus();}
- });
-});
-const manual=document.querySelector('#demo-manual');
-if(manual)manual.addEventListener('change',()=>{
- document.querySelector('#demo-action-controls').hidden=!manual.checked;
- document.querySelector('#demo-manual-status').textContent=manual.checked?'Your turn. Choose an action in this preview.':'Automatic play. Switch on manual control to preview the actions.';
-});
-document.querySelectorAll('[data-demo-action]').forEach(button=>button.addEventListener('click',()=>{
- document.querySelector('#demo-manual-status').textContent=`Preview: ${button.dataset.demoAction} selected. No live action is sent.`;
-}));
-const chatForm=document.querySelector('#demo-chat-form');
-if(chatForm)chatForm.addEventListener('submit',event=>{
- event.preventDefault();const input=document.querySelector('#demo-chat-text');const text=input.value.trim();if(!text)return;
- const message=document.createElement('div');message.className='preview-message bot-message';
- const sender=document.createElement('strong');sender.textContent='Bot A · Operator reply';
- const content=document.createElement('p');content.textContent=text;message.append(sender,content);
- const thread=document.querySelector('#demo-chat-thread');thread.append(message);while(thread.children.length>6)thread.firstElementChild.remove();thread.scrollTop=thread.scrollHeight;
- input.value='';document.querySelector('#demo-chat-status').textContent='Reply added to this illustration only. Nothing was sent to a table.';
-});
