@@ -517,6 +517,8 @@ class Store:
         row['payload']=json.loads(row['payload']) if row['payload'] else None
         if row['payload']:
             row['payload'].setdefault('game',row['game'])
+            from .live_cards import enrich
+            enrich(self,site_id,row)
         if self.ctx.role=='operator':
             from .manual import Manual
             row['manual']=Manual(self).status(site_id,request_id)
