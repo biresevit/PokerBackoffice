@@ -1,7 +1,8 @@
 # Public product page
 
 The site root `/` serves the public PokerFill product page. It is static
-HTML/CSS/JavaScript and makes no API calls or requests for live customer data.
+HTML/CSS/JavaScript and makes no requests for live customer data. Only submitting
+the public quote form calls `/api/contact`.
 The hero lobby, profile charts and traffic visuals use labelled example data.
 The platform gallery uses the actual screenshots supplied for publication.
 
@@ -50,15 +51,27 @@ usernames, configuring profiles and schedules, and evaluating the setup.
 `frontend/bot-account-template.csv` matches the real backoffice CSV importer:
 usernames and optional profile names, with no balance-transfer functionality.
 
-`home-contact.js` composes an email draft to `support@pokerfill.com` from the
-public quote form. It opens the visitor's email app; the visitor reviews and
-sends the draft. There is no form-submission API, server email service or stored
-contact data. `tools/check_home_quote.py` checks validation, email composition,
-trial selection, CSV compatibility and mobile layout without sending email.
+`home-contact.js` posts enquiries to the anonymous `/api/contact` endpoint.
+The API validates fields and sends through Namecheap SMTP over verified TLS,
+using a fixed From/To `support@pokerfill.com` and the visitor's address as Reply-To.
+The only required secret is the Azure application setting
+`POKERFILL_SMTP_PASSWORD`. `tools/configure_contact_email.py` prompts locally
+with a masked field, verifies SMTP authentication and saves the secret directly
+to Azure without writing or printing it. No password is embedded in the website.
+
+Success is shown only after SMTP accepts the message. On errors/timeouts,
+the entered fields remain and an email draft link provides a fallback.
+There are no automatic retries or confirmation emails to arbitrary recipients.
+Same-origin JSON/custom-header checks, field limits and a honeypot reduce spam.
+Migration `sql/014_contact_rate_limit.sql` adds shared transaction-locked counters:
+five attempts per source IP/hour (IPv6 /64) and 100 total/day. It stores only
+hashed buckets, timestamps and counts, cleans after two days, and holds no
+enquiry contents. Enquiries are retained in the support mailbox only.
+`tools/check_home_quote.py` checks UI delivery, errors, validation, trial
+selection, CSV compatibility and mobile layout using mocked mail responses.
 
 ## Selected domain
 
 Public brand: **PokerFill**. Selected domain: `pokerfill.com`. Quote/contact
-mailbox: `support@pokerfill.com`. The operator requested the completed UI using
-this address before mailbox activation. Domain/DNS and mailbox provisioning
-must be completed before receiving real enquiries there.
+mailbox: `support@pokerfill.com`. The operator activated this mailbox and
+confirmed successful login and a test email on November 4, 2026.

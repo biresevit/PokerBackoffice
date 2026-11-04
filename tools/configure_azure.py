@@ -46,6 +46,7 @@ def main():
         elif not settings.get("BACKOFFICE_SQL_PASSWORD"):
             raise RuntimeError("Application SQL user exists without matching Azure settings; reconcile before rotation")
         permissions={
+            "backoffice.ContactRateLimit":"SELECT,INSERT,UPDATE,DELETE",
             "dbo.Customer":"SELECT","dbo.CustomerMachine":"SELECT","dbo.CustomerHandHistory":"SELECT",
             "dbo.CasinoSettings":"SELECT,INSERT,UPDATE",
             "backoffice.MachineLogRequest":"SELECT,INSERT,UPDATE",

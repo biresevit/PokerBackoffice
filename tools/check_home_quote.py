@@ -1,4 +1,4 @@
-"""Check quote composition locally without opening mail or sending enquiries."""
+"""Check quote submission locally with intercepted API calls; no email is sent."""
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
@@ -16,9 +16,14 @@ assert parse_csv((ROOT/'frontend/bot-account-template.csv').read_text())==[
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True)
     page=browser.new_page(viewport={'width':1440,'height':1000})
-    errors=[];api_calls=[]
+    errors=[];api_calls=[];enquiries=[];failures=[]
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.on('request',lambda r:api_calls.append(r.url) if '/api/' in r.url else None)
+    def contact_route(route):
+        enquiries.append(route.request.post_data_json)
+        route.fulfill(status=503 if failures else 200,
+                      json={'error':'Email is temporarily unavailable.'} if failures else {'sent':True})
+    page.route('**/api/contact',contact_route)
     page.add_init_script('''
       window.quoteDrafts=[];
       const original=HTMLAnchorElement.prototype.click;
@@ -33,7 +38,7 @@ with sync_playwright() as p:
     page.wait_for_url('**/#contact')
     submit=page.get_by_role('button',name='Request a custom quote',exact=False)
     submit.click()
-    assert page.evaluate('quoteDrafts.length')==0
+    assert not enquiries
     page.locator('[name=contact_name]').fill('Example Operator')
     page.locator('[name=contact_email]').fill('owner@example.com')
     page.locator('[name=site]').fill('Example Poker')
@@ -44,11 +49,14 @@ with sync_playwright() as p:
     page.locator('[name=games][value="Cash games"]').uncheck()
     submit.click()
     expect(page.locator('#quote-error')).to_have_text('Select at least one game format.')
-    assert page.evaluate('quoteDrafts.length')==0
+    assert not enquiries
     page.locator('[name=games][value=MTT]').check()
+    failures.append(True)
     submit.click()
-    expect(page.locator('#quote-status')).to_contain_text('Your email draft is ready')
-    uri=urlsplit(page.evaluate('quoteDrafts.at(-1)'));query=parse_qs(uri.query)
+    expect(page.locator('#quote-error')).to_contain_text('Email is temporarily unavailable.')
+    assert page.locator('[name=contact_name]').input_value()=='Example Operator'
+    assert page.evaluate('quoteDrafts.length')==0
+    uri=urlsplit(page.locator('#quote-email-draft').get_attribute('href'));query=parse_qs(uri.query)
     assert uri.scheme=='mailto' and uri.path=='support@pokerfill.com'
     assert query['subject']==['PokerFill quote and trial enquiry']
     body=query['body'][0]
@@ -58,10 +66,15 @@ with sync_playwright() as p:
         assert text in body,text
     page.locator('[name=trial]').uncheck()
     page.locator('[name=bots]').fill('0')
-    submit.click();assert page.evaluate('quoteDrafts.length')==1
+    submit.click();assert len(enquiries)==1
     page.locator('[name=bots]').fill('20')
+    failures.clear()
     submit.click()
-    assert 'one-month free trial: Not at this stage' in parse_qs(urlsplit(page.evaluate('quoteDrafts.at(-1)')).query)['body'][0]
+    expect(page.locator('#quote-status')).to_contain_text('Your enquiry has been sent')
+    assert enquiries[-1]['trial'] is False and enquiries[-1]['bots']=='20'
+    assert enquiries[-1]['games']==['MTT']
+    assert page.locator('[name=contact_name]').input_value()==''
+    expect(page.locator('#quote-email-draft')).to_be_hidden()
     page.locator('#contact').screenshot(path='artifacts/home-quote-desktop.png')
     page.locator('#getting-started').screenshot(path='artifacts/home-onboarding.png')
     for width in (1024,768,390,320):
@@ -69,6 +82,6 @@ with sync_playwright() as p:
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
     page.set_viewport_size({'width':390,'height':1000})
     page.locator('#contact').screenshot(path='artifacts/home-quote-mobile.png')
-    assert not api_calls and not errors,(api_calls,errors)
+    assert len(api_calls)==2 and all(url.endswith('/api/contact') for url in api_calls) and not errors,(api_calls,errors)
     browser.close()
-    print('Custom quote draft, trial terms, CSV, form validation and mobile passed; no email sent')
+    print('Direct quote submission, SMTP-error fallback, trial terms, CSV, validation and mobile passed; no email sent')

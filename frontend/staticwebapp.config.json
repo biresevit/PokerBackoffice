@@ -4,6 +4,7 @@
     { "route": "/api/setup/*", "allowedRoles": ["anonymous"] },
     { "route": "/api/updater/*", "allowedRoles": ["anonymous"] },
     { "route": "/api/health", "allowedRoles": ["anonymous"] },
+    { "route": "/api/contact", "allowedRoles": ["anonymous"] },
     { "route": "/api/*", "allowedRoles": ["authenticated"] },
     { "route": "/.auth/login/github", "statusCode": 404 }
   ],

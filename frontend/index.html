@@ -7,14 +7,14 @@
   <meta name="description" content="PokerFill helps poker operators build an active lobby with configurable automated players, varied strategy profiles and scheduled traffic across cash games, SNGs and MTTs.">
   <title>PokerFill — Give every player a game to join</title>
   <link rel="icon" href="/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/home.css?v=20261104.quote1">
-  <script src="/home.js?v=20261104.quote1" defer></script>
-  <link rel="stylesheet" href="/home-showcase.css?v=20261104.quote1">
-  <script src="/home-showcase.js?v=20261104.quote1" defer></script>
-  <link rel="stylesheet" href="/home-screens.css?v=20261104.quote1">
-  <script src="/home-screens.js?v=20261104.quote1" defer></script>
-  <link rel="stylesheet" href="/home-contact.css?v=20261104.quote1">
-  <script type="module" src="/home-contact.js?v=20261104.quote1"></script>
+  <link rel="stylesheet" href="/home.css?v=20261104.contact2">
+  <script src="/home.js?v=20261104.contact2" defer></script>
+  <link rel="stylesheet" href="/home-showcase.css?v=20261104.contact2">
+  <script src="/home-showcase.js?v=20261104.contact2" defer></script>
+  <link rel="stylesheet" href="/home-screens.css?v=20261104.contact2">
+  <script src="/home-screens.js?v=20261104.contact2" defer></script>
+  <link rel="stylesheet" href="/home-contact.css?v=20261104.contact2">
+  <script type="module" src="/home-contact.js?v=20261104.contact2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -88,7 +88,8 @@
       </div><fieldset><legend>Game formats *</legend><div class="quote-games"><label><input type="checkbox" name="games" value="Cash games" checked>Cash games</label><label><input type="checkbox" name="games" value="SNG">SNG</label><label><input type="checkbox" name="games" value="MTT">MTT</label></div></fieldset>
       <label class="quote-notes" for="quote-notes">Traffic plan and other requirements<textarea id="quote-notes" name="notes" rows="4" maxlength="1500" placeholder="Your timezone, preferred playing hours, launch plans or anything else we should know."></textarea></label>
       <label class="quote-trial"><input type="checkbox" name="trial" checked>I’m interested in the one-month free trial after compatibility review.</label>
-      <p id="quote-error" role="alert" hidden>Select at least one game format.</p><button class="quote-submit" type="submit">Request a custom quote ↗</button><p class="quote-mail-note">Opens an email draft with your requirements filled in. Review and send it using your email app.</p><p id="quote-status" role="status" hidden></p><a id="quote-email-draft" href="mailto:support@pokerfill.com" hidden>Open the enquiry email draft again</a>
+      <div class="quote-honeypot" aria-hidden="true"><label>Leave this field empty<input name="website" tabindex="-1" autocomplete="off"></label></div>
+      <p id="quote-error" role="alert" hidden>Select at least one game format.</p><button class="quote-submit" type="submit">Request a custom quote ↗</button><p class="quote-mail-note">Your enquiry is sent to support@pokerfill.com. We use your details to respond to your request.</p><p id="quote-status" role="status" hidden></p><a id="quote-email-draft" href="mailto:support@pokerfill.com" hidden>Email your enquiry directly</a>
       <noscript><p class="quote-mail-note">Email your platform, bot count and requirements to <a href="mailto:support@pokerfill.com">support@pokerfill.com</a>.</p></noscript></form></div></section>
   </main>
   <footer class="site-footer wrap"><a class="wordmark" href="/"><img src="/mark.svg" alt="" width="30" height="30"><span>PokerFill</span></a><p>Automated players. Operator controlled.</p><a class="quote-footer-email" href="mailto:support@pokerfill.com">support@pokerfill.com</a><a href="/backoffice">Customer backoffice <span aria-hidden="true">↗</span></a></footer>

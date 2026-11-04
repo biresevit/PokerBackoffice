@@ -73,6 +73,11 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 db.one("SELECT TOP(1) 1 AS ok FROM backoffice.Membership")
             return response({"status": "ready"})
         headers = {k.lower(): v for k, v in request.headers.items()}
+        if request.path == '/api/contact':
+            if request.method != 'POST':
+                raise Error(405, 'Method not allowed')
+            from .contact import submit
+            return response(submit(request.body, headers, session_factory))
         setup=re.fullmatch(r"/api/setup/(request|poll|complete|restore)",request.path)
         if setup:
             if request.method!='POST':raise Error(405,'Method not allowed')
