@@ -15,14 +15,14 @@ class DB:
             if 'CustomerId<>' in sql:return {'SiteId':2} if self.other_customer else None
             return {'id':1,'name':'Evenbet','customer_id':14004} if args==(1,14004) else None
         if 'FROM dbo.CasinoSettings' in sql:
-            assert args==('Evenbet',)
+            assert args==('Evenbet',14004)
             return deepcopy(self.setting)
         raise AssertionError(sql)
     def execute(self,sql,*args):
         self.writes.append((sql,args))
         if 'dbo.CasinoSettings' in sql:
-            assert args[-1]=='Evenbet'
-            self.setting=dict(zip(('use_help','profile_vs_humans','profile_max_stake','profile_in_tournaments'),args[:-1]),updated='now')
+            assert args[-2:]==('Evenbet',14004)
+            self.setting=dict(zip(('use_help','profile_vs_humans','profile_max_stake','profile_in_tournaments'),args[:-2]),updated='now')
 
 
 def service(role='operator',customer=14004):
@@ -62,11 +62,11 @@ def test_customer_scope_and_viewer_permissions(role,customer,status):
     assert error.value.status==status and not db.writes
 
 
-def test_shared_casino_cannot_be_changed_by_one_customer():
+def test_another_customer_on_the_same_casino_does_not_block_scoped_settings():
     s,db=service();db.other_customer=True
-    assert not s.get(1)['editable']
-    with pytest.raises(Error,match='shared'):s.save(1,body(s))
-    assert not db.writes
+    assert s.get(1)['editable'] and s.get(1)['customer_id']==14004
+    s.save(1,body(s))
+    assert db.setting['profile_vs_humans']=='Everyone'
 
 
 @pytest.mark.parametrize('change',[

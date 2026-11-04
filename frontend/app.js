@@ -4,7 +4,7 @@ import {ManualControls} from './manual-controls.js?v=20261103.tmanual1';
 import {installDistributions} from './distributions-ui.js?v=20261101.dist2';
 import {installUpdates} from './updates-ui.js?v=20261101.setup1';
 import {installChat} from './chat-ui.js?v=20261029-chat1';
-import {installCasinoSettings} from './casino-settings.js?v=20261103.settings1';
+import {installCasinoSettings} from './casino-settings.js?v=20261104.customer1';
 import {installMachineLogs} from './machine-logs.js?v=20261104.logs1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

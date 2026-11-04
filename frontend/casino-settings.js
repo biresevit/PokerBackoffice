@@ -3,9 +3,8 @@ export function installCasinoSettings({$,esc,state,pages,render,siteApi,toast,se
   const d=await siteApi('settings'),s=d.settings;
   const toggles=(label,name,value)=>select(label,name,String(value),[['false','Off'],['true','On']]);
   const body=`<form id="casino-settings-form"><section class="card"><div class="card-head"><h2>Decision settings for ${esc(d.casino)}</h2></div><div class="card-body">
-   <p>These settings apply to all bots using this casino. PDecision picks up saved changes during its normal refresh, usually within ${d.refresh_minutes} minutes. No restart is needed.</p>
+   <p>These settings apply to ${esc(state.customer.name)}’s bots on ${esc(d.casino)}. Each customer has separate settings for every poker site. PDecision picks up saved changes during its normal refresh, usually within ${d.refresh_minutes} minutes. No restart is needed after the customer-scoped PDecision update.</p>
    ${!d.exists?'<div class="notice">No casino settings have been saved. PDecision currently uses its built-in rules. Save this form to set explicit values for this casino.</div>':''}
-   ${d.shared?'<div class="notice">This casino is shared with another customer. Ask the main administrator to change its settings.</div>':''}
    ${state.customer.role==='viewer'?'<p class="sub">Your account has view-only access.</p>':''}
    <fieldset class="form-grid" ${!d.editable?'disabled':''} style="border:0;padding:0;margin:24px 0">
     <div>${toggles('Card sharing (UseHelp)','use_help',s.use_help)}<p class="sub">Use the hole cards of other bots at the same table when making decisions.</p></div>
