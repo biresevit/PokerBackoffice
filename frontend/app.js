@@ -119,7 +119,7 @@ function modal(title,content,onSave,label='Save changes') {
   d.showModal();
 }
 function login(message='Your workspace, in one place.') {
-  $('#app').innerHTML=`<div class="login"><div class="login-art"><a class="brand"><img src="/mark.svg" alt="">Poker Control</a><div><p>YOUR OPERATIONS. IN VIEW.</p><h1>A clear view of<br>every table.</h1><p>Accounts, schedules and live operations.<br>One workspace for your poker sites.</p></div><div class="login-foot">Built around your operation.</div></div><div class="login-form"><div class="login-box"><p class="eyebrow">WELCOME BACK</p><h2>${esc(message)}</h2><p>Sign in with your Microsoft account to access your customer workspace.</p><a class="button primary" href="/.auth/login/aad?post_login_redirect_uri=/">Continue with Microsoft →</a><p class="signin-note">Access is limited to customers registered by an administrator.</p></div></div></div>`;
+  $('#app').innerHTML=`<div class="login"><div class="login-art"><a class="brand"><img src="/mark.svg" alt="">Poker Control</a><div><p>YOUR OPERATIONS. IN VIEW.</p><h1>A clear view of<br>every table.</h1><p>Accounts, schedules and live operations.<br>One workspace for your poker sites.</p></div><div class="login-foot">Built around your operation.</div></div><div class="login-form"><div class="login-box"><p class="eyebrow">WELCOME BACK</p><h2>${esc(message)}</h2><p>Sign in with your Microsoft account to access your customer workspace.</p><a class="button primary" href="/.auth/login/aad?post_login_redirect_uri=/backoffice">Continue with Microsoft →</a><p class="signin-note">Access is limited to customers registered by an administrator.</p></div></div></div>`;
 }
 async function init(){
   try {

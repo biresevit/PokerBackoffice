@@ -1,5 +1,7 @@
 {
   "routes": [
+    { "route": "/backoffice", "rewrite": "/workspace.html" },
+    { "route": "/backoffice/", "rewrite": "/workspace.html" },
     { "route": "/api/setup/*", "allowedRoles": ["anonymous"] },
     { "route": "/api/updater/*", "allowedRoles": ["anonymous"] },
     { "route": "/api/health", "allowedRoles": ["anonymous"] },

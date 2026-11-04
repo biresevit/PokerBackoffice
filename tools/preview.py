@@ -42,6 +42,8 @@ def main():
                 self.end_headers()
                 self.wfile.write(result.body)
             elif self.command == "GET":
+                if parsed.path in ('/backoffice','/backoffice/'):
+                    self.path='/workspace.html'
                 super().do_GET()
             else:
                 self.send_error(405)
