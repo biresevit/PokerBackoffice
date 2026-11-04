@@ -195,9 +195,9 @@ A release is an immutable, signed zip containing both PC applications: PokerCont
 2. Build PokerController. This bundles `poker_controller` **and** `schedule_controller` from the working tree, so both repositories must be at the commits you intend to ship:
    ```powershell
    cd C:\Users\bires\projects\bot\PokerController
-   .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onedir --name PokerController --distpath artifacts\fleet-package --workpath artifacts\fleet-build --specpath artifacts --paths ..\ScheduleController --collect-submodules poker_controller --collect-submodules schedule_controller updater\worker_entry.py
+   .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onedir --name PokerController --distpath artifacts\fleet-package --workpath artifacts\fleet-build --specpath artifacts --paths ..\ScheduleController --collect-submodules poker_controller --collect-submodules schedule_controller --add-binary "artifacts\updater-agent\PokerSuite.Updater.exe;diagnostics-agent" updater\worker_entry.py
    ```
-   It must end with `Build complete!`; the output is `artifacts\fleet-package\PokerController`.
+   It must end with `Build complete!`; the output is `artifacts\fleet-package\PokerController`. Check that `_internal\diagnostics-agent\PokerSuite.Updater.exe` is there: the worker starts the machine-diagnostics collector from it, and a release without it is about 31 MB instead of about 59 MB.
 3. Publish:
    ```powershell
    cd C:\Users\bires\projects\bot\PokerBackoffice
