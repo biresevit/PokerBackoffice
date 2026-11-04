@@ -54,6 +54,10 @@ The game-support section explains: NLH uses a live postflop solver and supports
 cash games, SNG and MTT; PLO4 uses saved solver ranges for cash games; PLO5 has
 the least advanced strategy of the three and supports cash games. SNG/MTT are
 NLH only. Straddle, ante and run it twice are supported; double-board games are not.
+The same section lists EvenBet (`https://evenbeter.com/`) and Run Your Own Poker
+Site (`https://runyourownpokersite.com/`) as supported platforms, linking to their
+sites. Additional platform and custom-site integrations are offered following
+an interface review and agreement on scope and timing.
 
 The approved offer is one month free after compatibility review. The operator
 provides the bot accounts and funds their balances; trial scope and start date
