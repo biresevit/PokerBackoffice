@@ -18,7 +18,7 @@ with sync_playwright() as p:
     expect(page.get_by_role('button',name='0.10 / 0.20',exact=True)).to_have_attribute('aria-pressed','true')
     page.get_by_role('button',name='1 / 2',exact=True).click()
     page.get_by_text('Are these automated players?',exact=False).click()
-    expect(page.locator('details[open]')).to_contain_text('Yes. Poker Control manages poker bots')
+    expect(page.locator('details[open]')).to_contain_text('Yes. PokerFill manages poker bots')
     # Every local fragment link must have a destination.
     assert page.evaluate('''() => [...document.querySelectorAll('a[href^="#"]')].every(a=>document.getElementById(a.hash.slice(1)))''')
     for width in (1440,1024,768,390,320):

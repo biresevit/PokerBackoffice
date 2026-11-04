@@ -1,6 +1,6 @@
 # Public product page
 
-The site root `/` serves the public Poker Control product page. It is static
+The site root `/` serves the public PokerFill product page. It is static
 HTML/CSS/JavaScript and makes no API calls or requests for customer data.
 The lobby, profile mix and traffic visuals use explicitly labelled example data.
 
@@ -18,3 +18,11 @@ With `tools/preview.py --port 4298` running, `tools/check_home.py` checks public
 access without private API calls, stake selection, FAQs, mobile widths, sign-in
 and old workspace links. `tools/check_live_cards.py` verifies live windows
 through the root URL redirect. Deploy using the existing `tools/deploy.py`.
+
+## Selected domain
+
+Public brand: **PokerFill**. Selected domain: `pokerfill.com`. Planned demo
+mailbox: `hello@pokerfill.com`. Registration, DNS and mailbox provisioning are
+still required. Keep the existing platform links until the mailbox can receive
+enquiries.
+
