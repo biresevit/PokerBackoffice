@@ -11,7 +11,7 @@ with sync_playwright() as p:
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.on('request',lambda r:api_calls.append(r.url) if '/api/' in r.url else None)
     page.goto('http://127.0.0.1:4298/')
-    expect(page.get_by_role('heading',name='Give every player a game to join.')).to_be_visible()
+    expect(page.get_by_role('heading',name='Complete poker bot solution for operators.')).to_be_visible()
     assert not api_calls,'Public page must not request private customer data'
     page.get_by_role('button',name='0.10 / 0.20',exact=True).click()
     expect(page.locator('[data-demo-stake]')).to_have_text('0.10 / 0.20')

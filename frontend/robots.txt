@@ -1,0 +1,9 @@
+# Public product content is available to search engines and AI search crawlers.
+# These directives do not replace authentication on customer APIs.
+User-agent: *
+Disallow: /backoffice
+Disallow: /workspace.html
+Disallow: /api/
+Disallow: /.auth/
+
+Sitemap: https://pokerfill.com/sitemap.xml

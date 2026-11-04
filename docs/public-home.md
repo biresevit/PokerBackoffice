@@ -6,6 +6,12 @@ the public quote form calls `/api/contact`.
 The hero lobby, profile charts and traffic visuals use labelled example data.
 The platform gallery uses the actual screenshots supplied for publication.
 
+The page positions PokerFill as a complete B2B poker bot and liquidity solution:
+strategies, scheduling and operational tools are included; supported platforms
+require no customer-developed API integration; bots can run on customer Windows
+machines or PokerFill machines. Search metadata, structured data, robots and
+sitemap configuration and the next indexing steps are in `search-visibility.md`.
+
 The existing customer app is served at `/backoffice`, rewritten to
 `workspace.html`. Microsoft sign-in returns there. API authentication and
 customer membership checks are unchanged. Root links with existing workspace
