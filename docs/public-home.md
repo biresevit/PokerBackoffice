@@ -14,6 +14,15 @@ Page files: `frontend/index.html`, `home.css`, `home.js`. The brand and sign-in
 links use relative URLs so the page works on the existing Azure hostname and
 on a custom domain once that domain is configured separately.
 
+`home-showcase.css` and `home-showcase.js` provide the expanded product tour.
+The eight profile cards reproduce the supplied example VPIP/PFR/3-bet/C-bet
+values as responsive vector charts in the site's palette. The MTT illustration
+uses 20 human entries plus either 100 or 200 operator-funded entries, each
+contributing $10 to the pool, excluding fees. It displays the operator's funding
+separately from the total; this is an illustration, not a guaranteed payout.
+Live lobby, manual control and chat previews use invented account labels and
+local browser interactions only. They never send poker actions or chat messages.
+
 With `tools/preview.py --port 4298` running, `tools/check_home.py` checks public
 access without private API calls, stake selection, FAQs, mobile widths, sign-in
 and old workspace links. `tools/check_live_cards.py` verifies live windows
