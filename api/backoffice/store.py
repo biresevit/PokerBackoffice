@@ -540,10 +540,13 @@ class Store:
             averages.AvgDisk AS average_disk,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId) AND e.IsConfirmedSeat=1) AS entries,
+               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId)
+               -- every format: a ring seat once observed, an SNG/MTT ('T…') once the tournament seated the bot
+               AND (e.IsConfirmedSeat=1 OR LEFT(e.TableId,1)='T' AND e.Status='seated')) AS entries,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId) AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS pending_entries
+               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId) AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0
+               AND NOT (LEFT(e.TableId,1)='T' AND e.Status='seated')) AS pending_entries
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
             LEFT JOIN scheduler.MachineCapacity cap ON cap.MachineId=m.MachineId
             -- one row per poker site the PC plays, and per site taken off it that still has open entries
