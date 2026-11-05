@@ -75,6 +75,23 @@ def test_import_upsert_preserves_preferences_and_stale_version(store):
     assert e.value.status==409
 
 
+def test_import_stores_the_login_and_never_returns_the_password(store):
+    version=store.accounts(1)["version"]
+    body={"csv":"username,password,email\n__backoffice_login_test,s3cret,login_test@bots.example.invalid\n","version":version}
+    preview=store.import_accounts(1,body)
+    assert preview["changes"][0]["email"]=="login_test@bots.example.invalid" and "password" not in preview["changes"][0]
+    store.import_accounts(1,dict(body,token=preview["token"]),apply=True)
+    row=store.db.one("""SELECT b.LoginEmail,b.LoginPassword,p.MaxSngEntries FROM dbo.BotAccount b
+        JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId WHERE b.Username='__backoffice_login_test'""")
+    assert (row["LoginEmail"],row["LoginPassword"])==("login_test@bots.example.invalid","s3cret")
+    # a new password for the same account is an update; a blank one leaves it as it is
+    version=store.accounts(1)["version"]
+    body={"csv":"username,password,email\n__backoffice_login_test,n3w,login_test@bots.example.invalid\n","version":version}
+    assert store.import_accounts(1,body)["counts"]["update"]==1
+    body={"csv":"username,password,email\n__backoffice_login_test,,\n","version":version}
+    assert store.import_accounts(1,body)["counts"]["unchanged"]==1
+
+
 def test_viewer_and_foreign_hand_blocked(store):
     viewer=Store(store.db,Context(14004,"test","viewer","viewer"))
     with pytest.raises(Error) as e:

@@ -49,7 +49,7 @@ def test_csv_duplicates_rejected():
 
 
 def test_csv_quoted_names_and_bom():
-    assert parse_csv('\ufeffnickname,profile\n"a,b",Strong Balanced')[0] == {"username":"a,b","strategy":5}
+    assert parse_csv('\ufeffnickname,profile\n"a,b",Strong Balanced')[0] == {"username":"a,b","strategy":5,"email":None,"password":None}
 
 
 def test_malformed_stakes_and_overlapping_schedule():

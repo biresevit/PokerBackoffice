@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, username, windows, stake_bands, tournament_exclusions, account_settings, parse_csv
-from .distributions import Distributions
+from .distributions import Distributions, FIELDS as DISTRIBUTED
 
 
 ENTRY_FORMAT_SQL = "CASE WHEN lt.TableType IN ('SNG','MTT') THEN lt.TableType ELSE 'RING' END"
@@ -296,7 +296,7 @@ class Store:
         if mode not in ("upsert", "replace"):
             raise Error(400, "Invalid import mode")
         existing = self.db.rows("""SELECT b.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,
-            p.SiteId AS site_id,p.DeletedUtc AS deleted,p.IsSynthetic AS synthetic
+            b.LoginEmail AS email,b.LoginPassword AS password,p.SiteId AS site_id,p.DeletedUtc AS deleted,p.IsSynthetic AS synthetic
             FROM dbo.BotAccount b LEFT JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId
             WHERE b.Casino=%s""", site["name"])
         by_name = {r["username"].casefold(): r for r in existing}
@@ -308,9 +308,10 @@ class Store:
                 raise Error(400, "The __schedule_demo_ prefix is reserved for simulation accounts")
             if old and old["site_id"] != site_id:
                 raise Error(409, f"Account {row['username']} requires an administrator ownership assignment")
-            # A blank profile leaves an existing account's profile as it is.
+            # A blank profile or login leaves an existing account's one as it is.
+            login = old and row["email"] is not None and (row["email"], row["password"]) != (old["email"], old["password"])
             kind = ("create" if not old else "restore" if old["deleted"] else
-                    "update" if row["strategy"] is not None and row["strategy"] != old["strategy"] else "unchanged")
+                    "update" if row["strategy"] is not None and row["strategy"] != old["strategy"] or login else "unchanged")
             changes.append(dict(row, kind=kind, id=old["id"] if old else None))
         if any(c["kind"] == "create" and c["strategy"] is None for c in changes) and \
                 not self.db.one("SELECT 1 AS x FROM backoffice.AccountDistribution WHERE SiteId=%s AND Field='strategy'", site_id):
@@ -332,7 +333,8 @@ class Store:
         rows = parse_csv(body.get("csv"))
         preview = self._import_plan(site_id, site, rows, body.get("mode", "upsert"))
         if not apply:
-            return preview
+            # Passwords never go back to the browser; the token still covers them.
+            return dict(preview, changes=[{k: v for k, v in c.items() if k != "password"} for c in preview["changes"]])
         if body.get("token") != preview["token"]:
             raise Error(409, "Import preview changed. Preview the CSV again before applying it.")
         picker = Distributions(self).new_account_picker(site_id) if preview["counts"]["create"] else None
@@ -342,8 +344,9 @@ class Store:
                 # Settings with a site distribution come from it; the rest keep the built-in defaults.
                 picked = picker({"strategy": change["strategy"]})
                 strategy = change["strategy"] if change["strategy"] is not None else picked["strategy"]
-                aid = self.db.one("""INSERT dbo.BotAccount(Casino,Username,Strategy) OUTPUT inserted.BotAccountId AS id
-                    VALUES(%s,%s,%s)""", site["name"], change["username"], strategy)["id"]
+                aid = self.db.one("""INSERT dbo.BotAccount(Casino,Username,Strategy,LoginEmail,LoginPassword)
+                    OUTPUT inserted.BotAccountId AS id VALUES(%s,%s,%s,%s,%s)""",
+                    site["name"], change["username"], strategy, change.get("email"), change.get("password"))["id"]
                 tier, freq, minutes, post, rit, show, weights = self._defaults(site_id, strategy)
                 tier, freq, minutes = picked.get("stake", tier), picked.get("frequency", freq), picked.get("max_minutes", minutes)
                 post, rit = picked.get("post_bb_chance", post), picked.get("run_it_twice_chance", rit)
@@ -351,17 +354,20 @@ class Store:
                 self.db.execute("""INSERT scheduler.AccountPolicy(BotAccountId,SiteId,StakeTier,PlayingFrequency,
                     MaxPlaytimeMinutes,PostBbChance,RunItTwiceChance,ShowCardsChance,BuyInPolicyJson)
                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", aid, site_id, tier, freq, minutes, post, rit, show, json.dumps(weights))
-                for field, column in (("max_tables", "MaxTables"), ("rebuy_ring_chance", "RebuyRingChance"),
-                                      ("rebuy_tournament_chance", "RebuyTournamentChance")):
-                    if field in picked:
-                        self.db.execute(f"UPDATE scheduler.AccountPolicy SET {column}=%s WHERE BotAccountId=%s", picked[field], aid)
+                inserted = {"strategy", "stake", "frequency", "max_minutes", "post_bb_chance", "run_it_twice_chance", "show_cards_chance"}
+                for field, value in picked.items():
+                    if field not in inserted:
+                        self.db.execute(f"UPDATE scheduler.AccountPolicy SET {DISTRIBUTED[field]['column']}=%s WHERE BotAccountId=%s", value, aid)
             elif kind == "update":
-                self.db.execute("UPDATE dbo.BotAccount SET Strategy=%s,UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s", change["strategy"], aid)
+                self.db.execute("""UPDATE dbo.BotAccount SET Strategy=COALESCE(%s,Strategy),LoginEmail=COALESCE(%s,LoginEmail),
+                    LoginPassword=COALESCE(%s,LoginPassword),UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s""",
+                    change["strategy"], change.get("email"), change.get("password"), aid)
             elif kind == "restore":
                 self.db.execute("UPDATE scheduler.AccountPolicy SET DeletedUtc=NULL,UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s", site_id, aid)
-                self.db.execute("""UPDATE b SET Strategy=COALESCE(%s,b.Strategy),IsActive=CASE WHEN p.IsSynthetic=1 THEN 0 ELSE 1 END,
+                self.db.execute("""UPDATE b SET Strategy=COALESCE(%s,b.Strategy),LoginEmail=COALESCE(%s,b.LoginEmail),
+                    LoginPassword=COALESCE(%s,b.LoginPassword),IsActive=CASE WHEN p.IsSynthetic=1 THEN 0 ELSE 1 END,
                     b.UpdatedUtc=SYSUTCDATETIME() FROM dbo.BotAccount b JOIN scheduler.AccountPolicy p ON p.BotAccountId=b.BotAccountId
-                    WHERE p.SiteId=%s AND b.BotAccountId=%s""", change["strategy"], site_id, aid)
+                    WHERE p.SiteId=%s AND b.BotAccountId=%s""", change["strategy"], change.get("email"), change.get("password"), site_id, aid)
             elif kind == "delete":
                 self._delete_account(site_id, aid)
         self.bump(site_id)

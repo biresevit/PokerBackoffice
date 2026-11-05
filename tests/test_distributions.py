@@ -97,9 +97,24 @@ def test_import_picker_counts_profiles_given_in_the_csv():
 
 
 def test_csv_profile_column_is_optional():
-    assert parse_csv("username\nann\nbob\n") == [{"username": "ann", "strategy": None}, {"username": "bob", "strategy": None}]
-    assert parse_csv("username,profile\nann,\nbob,Maniac\n") == [{"username": "ann", "strategy": None}, {"username": "bob", "strategy": 1}]
+    none = {"email": None, "password": None}
+    assert parse_csv("username\nann\nbob\n") == [{"username": "ann", "strategy": None, **none}, {"username": "bob", "strategy": None, **none}]
+    assert parse_csv("username,profile\nann,\nbob,Maniac\n") == [{"username": "ann", "strategy": None, **none}, {"username": "bob", "strategy": 1, **none}]
     with pytest.raises(Error, match="unknown profile"):
         parse_csv("username,profile\nann,Nobody\n")
     with pytest.raises(Error, match="header"):
         parse_csv("username,stake\nann,low\n")
+
+
+def test_csv_takes_the_login_after_the_username():
+    rows = parse_csv("username,password,email\nmatte_99,1MiDkp,matte_99@bots.bluffpoker.invalid\nnick90,,\n")
+    assert rows == [{"username": "matte_99", "strategy": None, "email": "matte_99@bots.bluffpoker.invalid", "password": "1MiDkp"},
+                    {"username": "nick90", "strategy": None, "email": None, "password": None}]
+    assert parse_csv("username,email,password,profile\nann,a@x.io,pw,Maniac\n")[0] == \
+        {"username": "ann", "strategy": 1, "email": "a@x.io", "password": "pw"}
+    with pytest.raises(Error, match="both email and password"):
+        parse_csv("username,password,email\nann,pw,\n")
+    with pytest.raises(Error, match="invalid email"):
+        parse_csv("username,password,email\nann,pw,not-an-email\n")
+    with pytest.raises(Error, match="header"):
+        parse_csv("password,username\npw,ann\n")

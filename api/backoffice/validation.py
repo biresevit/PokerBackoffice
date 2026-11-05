@@ -58,10 +58,12 @@ def parse_csv(text):
     reader = csv.reader(io.StringIO(text.lstrip("\ufeff")), strict=True)
     try:
         header = [h.strip().casefold() for h in next(reader, [])]
-        # The profile column is optional: a missing or blank profile is assigned from the site's
-        # profile distribution when the account is created.
-        if not 1 <= len(header) <= 2 or header[0] not in ("username", "nickname") or header[1:] not in ([], ["profile"]):
-            raise Error(400, "CSV header must be username,profile or just username (nickname is also accepted)")
+        # username first, then any of password, email and profile. A missing or blank profile is assigned
+        # from the site's profile distribution when the account is created; a blank login keeps the stored one.
+        if (not header or header[0] not in ("username", "nickname") or len(set(header[1:])) != len(header) - 1
+                or not set(header[1:]) <= {"password", "email", "profile"}):
+            raise Error(400, "CSV header must start with username (or nickname), followed by any of password, email, profile")
+        column = {name: i for i, name in enumerate(header)}
         rows, seen = [], set()
         profiles = {v.casefold(): k for k, v in PROFILES.items()}
         for line, row in enumerate(reader, 2):
@@ -72,11 +74,19 @@ def parse_csv(text):
             name = username(row[0])
             if name.casefold() in seen:
                 raise Error(400, f"Line {line}: duplicate username {name}")
-            text = row[1].strip() if len(row) > 1 else ""
+            value = lambda key: row[column[key]].strip() if key in column and column[key] < len(row) else ""
+            text = value("profile")
             profile = profiles.get(text.casefold()) if text else None
             if text and profile is None:
-                raise Error(400, f"Line {line}: unknown profile {row[1]}")
-            rows.append({"username": name, "strategy": profile})
+                raise Error(400, f"Line {line}: unknown profile {text}")
+            email, password = value("email"), value("password")
+            if email and (len(email) > 254 or "@" not in email or any(c.isspace() or ord(c) < 32 for c in email)):
+                raise Error(400, f"Line {line}: invalid email {email}")
+            if len(password) > 200 or any(ord(c) < 32 for c in password):
+                raise Error(400, f"Line {line}: password must be at most 200 printable characters")
+            if bool(email) != bool(password):
+                raise Error(400, f"Line {line}: give both email and password, or neither")
+            rows.append({"username": name, "strategy": profile, "email": email or None, "password": password or None})
             seen.add(name.casefold())
             if len(rows) > 5000:
                 raise Error(400, "Import is limited to 5,000 accounts at a time")
