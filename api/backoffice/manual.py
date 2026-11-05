@@ -15,6 +15,13 @@ def target_minor(value,scale=100):
     except (InvalidOperation,ValueError,TypeError):raise Error(400,'Enter a positive whole-chip amount.' if scale==1 else 'Enter a positive chip amount with at most two decimal places.')
 
 
+def table_id_ok(value):
+    """A tournament's playing table: a number on EvenBet, a UUID on BluffPoker."""
+    if value.isdigit():return True
+    try:return str(uuid.UUID(value))==value.lower()
+    except ValueError:return False
+
+
 class Manual:
     def __init__(self,store):self.store=store;self.db=store.db
 
@@ -29,7 +36,7 @@ class Manual:
         if not row:raise Error(404,'Live view was not found')
         payload=json.loads(row['PayloadJson']) if row.get('PayloadJson') else {}
         row['ControlTableId']=str(payload.get('table_id') or '') if str(row['TableId']).startswith('T') else str(row['TableId'])
-        if str(row['TableId']).startswith('T') and not row['ControlTableId'].isdigit():row['ControlTableId']=''
+        if str(row['TableId']).startswith('T') and not table_id_ok(row['ControlTableId']):row['ControlTableId']=''
         return row
 
     def lock(self,row):

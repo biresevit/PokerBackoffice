@@ -155,3 +155,17 @@ def test_sit_commands_need_a_new_worker_and_a_matching_seat_state(action,fields,
 def test_sit_command_waits_for_the_previous_one():
     m,db=service();manual_payload(db,table_commands=True,away=True);db.pending_command={'ActionId':'p'}
     with pytest.raises(Error,match='still being sent'):m.action(1,db.request,{'action':'sit_in'})
+
+
+def test_bluffpoker_tournament_control_uses_its_uuid_playing_table():
+    m,db=tournament_service()
+    table='0225c21c-c869-4c1a-83d6-75003934ee6f'
+    payload=json.loads(db.row['PayloadJson']);payload['table_id']=table;db.row['PayloadJson']=json.dumps(payload)
+    m.mode(1,db.request,{'enabled':True,'amount_unit':'tournament_chips'})
+    assert db.writes[0][1][-1]==table
+
+
+def test_tournament_control_ignores_a_malformed_playing_table():
+    from backoffice.manual import table_id_ok
+    assert table_id_ok('42') and table_id_ok('0225c21c-c869-4c1a-83d6-75003934ee6f')
+    assert not table_id_ok("42; DROP") and not table_id_ok('')
