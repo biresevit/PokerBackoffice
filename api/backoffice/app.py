@@ -250,6 +250,8 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                         return response(store.update_account(sid, int(tail), body))
                     if method == "DELETE":
                         return response(store.delete_account(sid, int(tail), body))
+            if method == "PUT" and section == "schedule" and tail == "pause":
+                return response(store.pause_joins(sid, body))
             if method == "PUT" and tail is None and section in ("schedule", "stakes"):
                 return response(getattr(store, "save_" + section)(sid, body))
             if method == "PUT" and section == "machines" and tail and tail.isdecimal():

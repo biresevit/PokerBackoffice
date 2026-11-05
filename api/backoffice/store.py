@@ -160,7 +160,7 @@ class Store:
             return self._site_cache[site_id]
         hint = "WITH(UPDLOCK,HOLDLOCK)" if lock else ""
         result = self.db.one(f"""SELECT SiteId AS id,Casino AS name,CustomerId AS customer_id,TimeZone AS timezone,
-            CurrencyCode AS currency,ConfigVersion AS version,SchedulingEnabled AS enabled
+            CurrencyCode AS currency,ConfigVersion AS version,SchedulingEnabled AS enabled,JoinsPaused AS joins_paused
             FROM scheduler.Site {hint} WHERE SiteId=%s AND CustomerId=%s""", site_id, self.ctx.customer_id)
         if result is None:
             raise Error(404, "Site not found")
@@ -375,7 +375,25 @@ class Store:
         rows = self.db.rows("""SELECT Weekday AS weekday,StartMinute AS start_minute,EndMinute AS end_minute,
             TargetEntries AS target FROM scheduler.ScheduleWindow WHERE SiteId=%s AND Format=%s ORDER BY Weekday,StartMinute""",
             site_id, fmt)
-        return {"windows": rows, "format": fmt, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"]}
+        return {"windows": rows, "format": fmt, "timezone": site["timezone"], "version": site["version"], "enabled": site["enabled"],
+                "joins_paused": bool(site.get("joins_paused"))}
+
+    def pause_joins(self, site_id, body):
+        """Schedule page switch: while paused the scheduler plans no ring joins or SNG/MTT registrations; bots still
+        leave and sessions still end. The scheduler's joins no PC has picked up yet are cancelled right away."""
+        self.site(site_id)
+        if self.ctx.role != "operator":
+            raise Error(403, "Your account has view-only access")
+        paused = body.get("paused")
+        if type(paused) is not bool:
+            raise Error(400, "Choose paused or running")
+        self.db.execute("UPDATE scheduler.Site SET JoinsPaused=%s,UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s", paused, site_id)
+        cancelled = 0
+        if paused:
+            cancelled = self.db.one("EXEC scheduler.CancelPausedJoins @SiteId=%s", site_id)["n"]
+        self._site_cache.pop(site_id, None)
+        self.audit("schedule.pause" if paused else "schedule.resume", site_id, {"cancelled_joins": cancelled})
+        return {"joins_paused": paused, "cancelled_joins": cancelled}
 
     def schedules(self, site_id):
         """Every format's weekly schedule in one query: {'RING': {...}, 'SNG': {...}, 'MTT': {...}}."""
