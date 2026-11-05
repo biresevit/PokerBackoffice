@@ -88,16 +88,20 @@ class Updates:
                 if aware.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)!=local:raise ValueError()
             except (ValueError,TypeError):raise Error(400,'Invalid local start time')
         immediate=bool(body.get('immediate'))
-        rid=str(uuid.uuid4())
+        rid=str(uuid.uuid4());agent_sites={}
         for mid in machines:
-            eligible=self.db.one("""SELECT g.MachineId FROM scheduler.MachineUpdateAgent g
+            # A PC playing several poker sites has one updater agent, enrolled under one of them: the PC may be
+            # updated from any of its sites, and its task is filed under the agent's site, where the agent looks.
+            eligible=self.db.one("""SELECT g.MachineId,g.SiteId FROM scheduler.MachineUpdateAgent g
                 JOIN scheduler.MachineAssignment a ON a.MachineId=g.MachineId AND a.SiteId=g.SiteId
                 JOIN dbo.CustomerMachine m ON m.MachineId=a.MachineId
-                WHERE g.MachineId=%s AND g.SiteId=%s AND m.CustomerId=%s AND m.IsActive=1 AND g.Enabled=1
-                    AND g.LastHeartbeatUtc>=DATEADD(second,-60,SYSUTCDATETIME())""",mid,site_id,self.ctx.customer_id)
+                WHERE g.MachineId=%s AND m.CustomerId=%s AND m.IsActive=1 AND g.Enabled=1
+                    AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment here WHERE here.MachineId=g.MachineId AND here.SiteId=%s)
+                    AND g.LastHeartbeatUtc>=DATEADD(second,-60,SYSUTCDATETIME())""",mid,self.ctx.customer_id,site_id)
             if not eligible:raise Error(409,f'Machine {mid} needs a connected updater agent')
+            agent_sites[mid]=eligible['SiteId']
         self.db.execute("INSERT scheduler.UpdateRollout(RolloutId,CustomerId,SiteId,ReleaseId,Status,NotBeforeUtc,RequestedBy,Immediate) VALUES(%s,%s,%s,%s,'queued',%s,%s,%s)",rid,self.ctx.customer_id,site_id,release,scheduled,self.ctx.subject,immediate)
-        for position,mid in enumerate(machines):self.db.execute("INSERT scheduler.MachineUpdateTask(TaskId,RolloutId,SiteId,MachineId,Position,Status) VALUES(%s,%s,%s,%s,%s,'queued')",str(uuid.uuid4()),rid,site_id,mid,position)
+        for position,mid in enumerate(machines):self.db.execute("INSERT scheduler.MachineUpdateTask(TaskId,RolloutId,SiteId,MachineId,Position,Status) VALUES(%s,%s,%s,%s,%s,'queued')",str(uuid.uuid4()),rid,agent_sites[mid],mid,position)
         self.store.audit('updates.create',rid,{'release_id':release,'machines':machines,'immediate':immediate})
         return {'id':rid}
 
