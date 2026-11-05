@@ -189,6 +189,7 @@ class Store:
         rows = self.db.rows("""SELECT b.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,
             b.IsActive AS active,p.StakeTier AS stake,p.PlayingFrequency AS frequency,
             p.MaxPlaytimeMinutes AS max_minutes,p.MaxTables AS max_tables,
+            p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,
             p.SessionMinMinutes AS session_min_minutes,p.SessionMaxMinutes AS session_max_minutes,
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
@@ -241,11 +242,11 @@ class Store:
         self.db.execute("UPDATE dbo.BotAccount SET Strategy=%s,UpdatedUtc=SYSUTCDATETIME() WHERE BotAccountId=%s",
                         values["strategy"], account_id)
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
-            MaxPlaytimeMinutes=%s,MaxTables=%s,PostBbChance=%s,RunItTwiceChance=%s,
+            MaxPlaytimeMinutes=%s,MaxTables=%s,MaxSngEntries=%s,MaxMttEntries=%s,PostBbChance=%s,RunItTwiceChance=%s,
             RebuyRingChance=%s,RebuyTournamentChance=%s,ShowCardsChance=%s,AddonChance=%s,BuyInPolicyJson=%s,
             UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s""",
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
-            values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
+            values["max_sng_entries"], values["max_mtt_entries"], values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
             values["rebuy_tournament_chance"], values["show_cards_chance"], values["addon_chance"],
             json.dumps(values["buy_in_weights"]), site_id, account_id)
         if enabled is not None:
@@ -446,6 +447,10 @@ class Store:
                 # the ones the tournament seated (they can be watched live).
                 row["bot_entries"] = self.db.one("""SELECT COUNT(*) AS n FROM scheduler.Entry
                     WHERE SiteId=%s AND TableId=%s AND IsOpen=1""", site_id, row["id"])["n"]
+                row["registered_bots"] = [r["username"] for r in self.db.rows("""SELECT b.Username AS username
+                    FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+                    WHERE e.SiteId=%s AND e.TableId=%s AND e.IsOpen=1 AND e.Status<>'seated' ORDER BY b.Username""",
+                    site_id, row["id"])]
                 row["players"] = self.db.rows("""SELECT b.Username AS username,e.BotAccountId AS account_id,
                     e.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,e.PlayTableId AS play_table
                     FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId

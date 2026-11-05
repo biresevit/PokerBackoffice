@@ -25,6 +25,8 @@ FIELDS = {
     "max_minutes": {"label": "Daily playtime preference (minutes)", "table": "policy", "column": "MaxPlaytimeMinutes",
                     "kind": "integer", "min": 1, "max": 1440},
     "max_tables": {"label": "Maximum tables", "table": "policy", "column": "MaxTables", "kind": "integer", "min": 1, "max": 100},
+    "max_sng_entries": {"label": "Maximum SNG entries at once", "table": "policy", "column": "MaxSngEntries", "kind": "integer", "min": 1, "max": 100},
+    "max_mtt_entries": {"label": "Maximum MTT entries at once", "table": "policy", "column": "MaxMttEntries", "kind": "integer", "min": 1, "max": 100},
     "post_bb_chance": {"label": "Post big blind chance", "table": "policy", "column": "PostBbChance", "kind": "chance"},
     "run_it_twice_chance": {"label": "Run it twice chance", "table": "policy", "column": "RunItTwiceChance", "kind": "chance"},
     "rebuy_ring_chance": {"label": "Rebuy chance at ring tables", "table": "policy", "column": "RebuyRingChance", "kind": "chance"},

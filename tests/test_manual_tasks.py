@@ -11,7 +11,7 @@ from backoffice.validation import Error
 class Database:
     def __init__(self, tables=None, entries=None, ready=True, lease=None):
         self.writes = []
-        self.session = dict(session_id='s1', id=4, username='emma', tier='high', max_tables=3, machine_id=10,
+        self.session = dict(session_id='s1', id=4, username='emma', tier='high', max_tables=3, max_sng_entries=1, max_mtt_entries=1, machine_id=10,
                             machine='DESKTOP-567E93', epoch='EPOCH', machine_ready=ready)
         self.entries = entries or []
         self.lobby = tables if tables is not None else [
@@ -165,3 +165,13 @@ def test_bluffpoker_tournament_ids_stay_text():
     from backoffice.manual_tasks import tournament_id
     assert tournament_id('T128001') == 128001
     assert tournament_id('T865722c6-e5b8-4fc0-8756-d6a35f029e91') == '865722c6-e5b8-4fc0-8756-d6a35f029e91'
+
+
+def test_register_respects_the_bots_sng_entry_limit():
+    db = Database(entries=[dict(id='e1', account_id=4, table_id='T7', status='joining', table_name='SNG #1',
+                                big_blind=None, leaving=False, table_type='SNG')])
+    db.tournaments = [tournament(1, 'SNG', 20, 2), tournament(2, 'SNG', 20, 4)]
+    with pytest.raises(Error, match='maximum of 1 SNG entry'):
+        tasks(db).create(1, {'kind': 'register_sng', 'account_id': '4', 'table_id': 'any'})
+    db.session['max_sng_entries'] = 2
+    assert tasks(db).create(1, {'kind': 'register_sng', 'account_id': '4', 'table_id': 'any'})['table'] == 'T2'

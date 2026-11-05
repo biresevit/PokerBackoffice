@@ -179,6 +179,8 @@ def account_settings(body):
         "frequency": choice(body.get("frequency"), TIERS, "frequency"),
         "max_minutes": integer(body.get("max_minutes"), 1, 1440, "daily minutes"),
         "max_tables": integer(body.get("max_tables"), 1, 100, "maximum tables"),
+        "max_sng_entries": integer(body.get("max_sng_entries", 1), 1, 100, "maximum SNG entries"),
+        "max_mtt_entries": integer(body.get("max_mtt_entries", 1), 1, 100, "maximum MTT entries"),
         "post_bb_chance": number(body.get("post_bb_chance"), 0, 1, "post BB chance"),
         "run_it_twice_chance": number(body.get("run_it_twice_chance"), 0, 1, "run it twice chance"),
         "rebuy_ring_chance": number(body.get("rebuy_ring_chance"), 0, 1, "ring rebuy chance"),

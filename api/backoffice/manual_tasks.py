@@ -27,7 +27,7 @@ class ManualTasks:
     def sessions(self,site_id):
         """Bots with a started, open session on a PC that is online, with their current tables."""
         rows=self.db.rows("""SELECT s.SessionId AS session_id,s.BotAccountId AS id,b.Username AS username,p.StakeTier AS tier,
-            p.MaxTables AS max_tables,s.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,
+            p.MaxTables AS max_tables,p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,s.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,
             a.WorkerEpoch AS epoch,CONVERT(bit,CASE WHEN a.IsEnabled=1 AND a.IsReady=1 AND a.MaintenanceTaskId IS NULL
                 AND a.WorkerEpoch IS NOT NULL AND a.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()) THEN 1 ELSE 0 END) AS machine_ready
             FROM scheduler.AccountSession s JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId
@@ -126,6 +126,10 @@ class ManualTasks:
             fmt='SNG' if kind=='register_sng' else 'MTT'
             if len(session['tables'])>=session['max_tables']:
                 raise Error(409,f"{session['username']} already uses its maximum of {session['max_tables']} tables")
+            limit=session['max_sng_entries'] if fmt=='SNG' else session['max_mtt_entries']
+            held=sum(1 for e in session['tables'] if e.get('table_type')==fmt)
+            if held>=limit:
+                raise Error(409,f"{session['username']} already holds its maximum of {limit} {fmt} entr{'y' if limit==1 else 'ies'}; raise it on the Accounts page")
             lease=self.db.one('SELECT MachineId,WorkerEpoch,RequiresReconciliation FROM scheduler.AccountLease WHERE BotAccountId=%s',account_id)
             if lease and (lease['MachineId']!=session['machine_id'] or str(lease['WorkerEpoch']).lower()!=str(session['epoch']).lower()
                           or lease['RequiresReconciliation']):
