@@ -528,8 +528,8 @@ class Store:
     def machines(self, site_id):
         self.site(site_id)
         rows = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,x.HostName AS host,
-            m.Casino AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
-            a.MaxEntries AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
+            COALESCE(st.Casino,m.Casino) AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
+            COALESCE(cap.MaxEntries,a.MaxEntries) AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
             a.MaintenanceTaskId AS maintenance_task_id,a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,
             latest.SampledUtc AS telemetry_at,latest.CpuPercent AS cpu_percent,
             latest.MemoryPercent AS memory_percent,latest.DiskPercent AS disk_percent,
@@ -540,12 +540,18 @@ class Store:
             averages.AvgDisk AS average_disk,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND e.IsConfirmedSeat=1) AS entries,
+               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId) AND e.IsConfirmedSeat=1) AS entries,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e JOIN scheduler.Site s ON s.SiteId=e.SiteId
              WHERE e.MachineId=m.MachineId AND s.CustomerId=m.CustomerId AND e.IsOpen=1
-               AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS pending_entries
+               AND (a.SiteId IS NULL OR e.SiteId=a.SiteId) AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS pending_entries
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
+            LEFT JOIN scheduler.MachineCapacity cap ON cap.MachineId=m.MachineId
+            -- one row per poker site the PC plays, and per site taken off it that still has open entries
             LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+                AND (EXISTS(SELECT 1 FROM backoffice.MachineAllowedSite w WHERE w.MachineId=a.MachineId AND w.SiteId=a.SiteId)
+                     OR EXISTS(SELECT 1 FROM scheduler.Entry o WHERE o.MachineId=a.MachineId AND o.SiteId=a.SiteId AND o.IsOpen=1)
+                     OR NOT EXISTS(SELECT 1 FROM backoffice.MachineAllowedSite w WHERE w.MachineId=a.MachineId))
+            LEFT JOIN scheduler.Site st ON st.SiteId=a.SiteId
             OUTER APPLY (SELECT TOP(1) t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.DiskPercent,
                 t.DiskFreeBytes,t.DiskTotalBytes,t.PokerControllerVersion,t.PDecisionVersion
                 FROM scheduler.MachineTelemetry t
@@ -685,10 +691,10 @@ class Store:
         active = self.db.rows("SELECT DISTINCT SiteId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1", machine_id)
         if any(r["SiteId"] not in allowed for r in active):
             raise Error(409, "Leave active tables before removing their site from this machine")
-        self.db.execute("DELETE backoffice.MachineAllowedSite WHERE MachineId=%s", machine_id)
-        for sid in allowed:
-            self.db.execute("INSERT backoffice.MachineAllowedSite(MachineId,SiteId) VALUES(%s,%s)", machine_id, sid)
-        self.db.execute("UPDATE scheduler.MachineAssignment SET MaxEntries=%s WHERE MachineId=%s", cap, machine_id)
+        if not allowed:
+            raise Error(400, "Choose at least one poker site for this machine")
+        self.db.execute("EXEC backoffice.SetMachineSites @CustomerId=%s,@MachineId=%s,@SiteIds=%s,@MaxEntries=%s",
+                        self.ctx.customer_id, machine_id, ",".join(map(str, allowed)), cap)
         self.db.execute("UPDATE backoffice.MachineMetadata SET Version=Version+1 WHERE MachineId=%s", machine_id)
         self.audit("machine.update", machine_id, {"max_entries": cap, "allowed_sites": allowed})
         return {"version": machine["Version"] + 1}
@@ -702,12 +708,12 @@ class Store:
             a.IsReady AS ready,a.LastHeartbeatUtc AS heartbeat,
             averages.AvgCpu AS average_cpu,averages.AvgMemory AS average_memory,averages.AvgDisk AS average_disk
             FROM dbo.CustomerMachine m LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=m.MachineId
-            LEFT JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+            JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId AND a.SiteId=%s
             OUTER APPLY(SELECT AVG(CONVERT(float,t.CpuPercent)) AS AvgCpu,
                 AVG(CONVERT(float,t.MemoryPercent)) AS AvgMemory,AVG(CONVERT(float,t.DiskPercent)) AS AvgDisk
                 FROM scheduler.MachineTelemetry t WHERE t.SiteId=a.SiteId AND t.MachineId=m.MachineId
                     AND t.SampledUtc>=DATEADD(minute,-15,SYSUTCDATETIME())) averages
-            WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""",self.ctx.customer_id)
+            WHERE m.CustomerId=%s AND m.IsActive=1 ORDER BY m.MachineId""",site_id,self.ctx.customer_id)
         for machine in machines:machine_health(machine)
         # Ring entries count as seated when the observer confirms the seat. Tournament tables are not
         # observed: a tournament entry is 'seated' once the tournament seated the bot, else 'registered'.

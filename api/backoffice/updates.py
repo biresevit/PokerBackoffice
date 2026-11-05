@@ -175,15 +175,15 @@ def agent_request(db,machine_id,headers,body,action):
         # is allowed to finish or roll back, so the machine is not left stopped.
         if phase=='reconciling' and status=='reconciling':
             from schedule_controller.update_rollouts import unconfirmed_absence
-            if task['RolloutStatus']=='paused' or not unconfirmed_absence(db,task['SiteId'],machine_id,'%s'):raise Error(409,'Fresh seat snapshots do not confirm absence')
+            if task['RolloutStatus']=='paused' or not unconfirmed_absence(db,machine_id,'%s'):raise Error(409,'Fresh seat snapshots do not confirm absence')
         elif phase=='reconciled' and status=='reconciling':
             from schedule_controller.update_rollouts import unconfirmed_absence
-            worker=db.one('SELECT IsReady FROM scheduler.MachineAssignment WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
-            if worker['IsReady'] or not unconfirmed_absence(db,task['SiteId'],machine_id,'%s'):raise Error(409,'Stop the drained worker and verify current seat snapshots before reconciliation')
-            db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND MachineId=%s AND IsOpen=1 AND Status='uncertain'",task['SiteId'],machine_id)
-            db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=CASE WHEN StartedUtc>SYSUTCDATETIME() THEN StartedUtc ELSE SYSUTCDATETIME() END,EndReason='software_update' WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
-            db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='reconciled_absent',UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
-            db.execute('DELETE scheduler.AccountLease WHERE SiteId=%s AND MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',task['SiteId'],machine_id)
+            worker=db.one('SELECT MAX(CONVERT(int,IsReady)) AS IsReady FROM scheduler.MachineAssignment WHERE MachineId=%s',machine_id)
+            if worker['IsReady'] or not unconfirmed_absence(db,machine_id,'%s'):raise Error(409,'Stop the drained worker and verify current seat snapshots before reconciliation')
+            db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1 AND Status='uncertain'",machine_id)
+            db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=CASE WHEN StartedUtc>SYSUTCDATETIME() THEN StartedUtc ELSE SYSUTCDATETIME() END,EndReason='software_update' WHERE MachineId=%s AND IsOpen=1",machine_id)
+            db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='reconciled_absent',UpdatedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1",machine_id)
+            db.execute('DELETE scheduler.AccountLease WHERE MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',machine_id)
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='stopping',UpdatedUtc=%s,Detail='Unconfirmed entries reconciled after verified absence. Installing.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='staged' and status in ('preparing','draining','forcing'):
             db.execute('UPDATE scheduler.MachineUpdateTask SET Staged=1 WHERE TaskId=%s',task['TaskId'])
@@ -193,20 +193,20 @@ def agent_request(db,machine_id,headers,body,action):
             # 'reconciled_absent' reasons that mean a fresh seat snapshot proved the bot had actually left.
             # Tournament registrations (TableId 'T...') stay open: EvenBet keeps them through the restart and the
             # new worker resumes them, or closes those EvenBet no longer holds. Ring seats are cut off.
-            db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",task['SiteId'],machine_id)
-            db.execute("UPDATE scheduler.Entry SET Status='uncertain' WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
-            db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=SYSUTCDATETIME(),EndReason='forced_update' WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
-            db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND MachineId=%s AND IsOpen=1",task['SiteId'],machine_id)
-            db.execute('DELETE scheduler.AccountLease WHERE SiteId=%s AND MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',task['SiteId'],machine_id)
+            db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id)
+            db.execute("UPDATE scheduler.Entry SET Status='uncertain' WHERE MachineId=%s AND IsOpen=1",machine_id)
+            db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=SYSUTCDATETIME(),EndReason='forced_update' WHERE MachineId=%s AND IsOpen=1",machine_id)
+            db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1",machine_id)
+            db.execute('DELETE scheduler.AccountLease WHERE MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',machine_id)
             # A killed worker never marks itself stopped; its fresh heartbeat would make the new worker
             # refuse to start ('Machine has a live worker') for 90 seconds and fail the update.
-            db.execute('UPDATE scheduler.MachineAssignment SET IsReady=0 WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
+            db.execute('UPDATE scheduler.MachineAssignment SET IsReady=0 WHERE MachineId=%s',machine_id)
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='stopping',UpdatedUtc=%s,Detail='Applications were force-stopped immediately; open sessions were cut off, not confirmed absent from the table.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='installing' and status in ('stopping','installing'):
             if task['RolloutStatus']=='paused':raise Error(409,'Rollout is paused')
             # Only an immediate update (force_stopped) reaches this with open entries: its kept tournament registrations.
-            if db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE SiteId=%s AND MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",task['SiteId'],machine_id):raise Error(409,'The machine still has open table entries')
-            if db.one('SELECT TOP(1) SessionId FROM scheduler.AccountSession WHERE SiteId=%s AND MachineId=%s AND IsOpen=1',task['SiteId'],machine_id):raise Error(409,'The machine still has open sessions')
+            if db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id):raise Error(409,'The machine still has open table entries')
+            if db.one('SELECT TOP(1) SessionId FROM scheduler.AccountSession WHERE MachineId=%s AND IsOpen=1',machine_id):raise Error(409,'The machine still has open sessions')
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='installing',UpdatedUtc=%s,Detail='Restarting applications.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='verifying' and status in ('installing','verifying'):
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='verifying',UpdatedUtc=%s,Detail='Checking application startup and health.' WHERE TaskId=%s",now,task['TaskId'])
@@ -215,14 +215,14 @@ def agent_request(db,machine_id,headers,body,action):
             worker=db.one('SELECT IsReady,LastHeartbeatUtc FROM scheduler.MachineAssignment WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
             if not worker or not worker['IsReady'] or not worker['LastHeartbeatUtc'] or worker['LastHeartbeatUtc']<now-timedelta(seconds=60):raise Error(409,'Waiting for the updated controller heartbeat')
             db.execute('UPDATE scheduler.MachineUpdateAgent SET CurrentReleaseId=%s WHERE MachineId=%s',task['ReleaseId'],machine_id)
-            db.execute('UPDATE scheduler.MachineAssignment SET MaintenanceTaskId=NULL WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
+            db.execute('UPDATE scheduler.MachineAssignment SET MaintenanceTaskId=NULL WHERE MachineId=%s',machine_id)
             if status!='resuming':db.execute("UPDATE scheduler.MachineUpdateTask SET Status='resuming',UpdatedUtc=%s,Detail='Healthy. Restoring scheduled traffic.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase in ('failed','rolled_back'):
             db.execute('UPDATE scheduler.MachineUpdateTask SET Status=%s,CompletedUtc=%s,UpdatedUtc=%s,Detail=%s WHERE TaskId=%s',phase,now,now,str(body.get('detail','Update failed'))[:1000],task['TaskId'])
             db.execute("UPDATE scheduler.UpdateRollout SET Status='paused',UpdatedUtc=%s WHERE RolloutId=%s",now,task['RolloutId'])
             # Only a verified rollback may restore traffic. An unverified failed
             # installation remains in maintenance for explicit intervention.
-            if phase=='rolled_back':db.execute('UPDATE scheduler.MachineAssignment SET MaintenanceTaskId=NULL WHERE SiteId=%s AND MachineId=%s',task['SiteId'],machine_id)
+            if phase=='rolled_back':db.execute('UPDATE scheduler.MachineAssignment SET MaintenanceTaskId=NULL WHERE MachineId=%s',machine_id)
         else:raise Error(409,'Invalid updater state transition')
         db.execute('UPDATE scheduler.MachineUpdateAgent SET Stage=%s,Detail=%s WHERE MachineId=%s',str(phase)[:100],str(body.get('detail',''))[:1000],machine_id)
         return {'accepted':True}
