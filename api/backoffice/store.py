@@ -527,7 +527,7 @@ class Store:
 
     def machines(self, site_id):
         self.site(site_id)
-        rows = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,
+        rows = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,x.HostName AS host,
             m.Casino AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
             a.MaxEntries AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
             a.MaintenanceTaskId AS maintenance_task_id,a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,

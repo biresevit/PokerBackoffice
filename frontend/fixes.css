@@ -157,3 +157,5 @@ dialog.replay-dialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-h
 /* Stakes: tournament buy-in range per tier. */
 .stake-subtitle{margin:18px 0 8px;font-size:13px}
 .stake-exclusions{margin-top:20px}.stake-exclusions textarea{width:100%;font-size:12px}
+
+.machine-sites{margin:18px 0 6px;display:flex;flex-direction:column;gap:10px}.machine-site{border:1px solid var(--line);border-radius:7px;padding:11px 13px;background:#fbfcf9}.machine-site-head{display:flex;align-items:center;gap:9px}.machine-site-entries{margin-left:auto;font-size:11px;color:var(--muted)}.machine-site .sub{margin:6px 0 8px;font-size:11px}.machine-site-actions{display:flex;gap:8px}
