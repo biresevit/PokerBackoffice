@@ -11,6 +11,12 @@ from .updates import operator
 from .validation import Error, is_excluded_tournament
 
 
+def tournament_id(table_id):
+    """Lobby key 'T…' to the platform's tournament id: a number on EvenBet, a UUID on BluffPoker."""
+    raw=str(table_id).removeprefix('T')
+    return int(raw) if raw.isdigit() else raw
+
+
 def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -114,7 +120,7 @@ class ManualTasks:
                 ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'leave','pending',1,%s,%s,%s,%s)""",
                 command_id,site_id,entry['id'],session['machine_id'],session['epoch'],version,
                 json.dumps({'manual':True,'unregister':True,'format':entry['table_type'],
-                            'tournament_id':int(str(entry['table_id']).removeprefix('T'))}),now,now+timedelta(minutes=10))
+                            'tournament_id':tournament_id(entry['table_id'])}),now,now+timedelta(minutes=10))
             table=entry['table_id'];table_name=entry['table_name']
         elif kind in ('register_sng','register_mtt'):
             fmt='SNG' if kind=='register_sng' else 'MTT'
@@ -149,7 +155,7 @@ class ManualTasks:
                 ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'join','pending',1,%s,%s,%s,%s)""",
                 command_id,site_id,entry_id,session['machine_id'],session['epoch'],version,
                 json.dumps({'account_id':account_id,'table_id':table,'manual':True,'format':fmt,
-                            'tournament_id':int(str(table).removeprefix('T'))}),now,now+timedelta(minutes=10))
+                            'tournament_id':tournament_id(table)}),now,now+timedelta(minutes=10))
         else:
             if len(session['tables'])>=session['max_tables']:
                 raise Error(409,f"{session['username']} already plays its maximum of {session['max_tables']} tables")

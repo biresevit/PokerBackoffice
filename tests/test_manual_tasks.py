@@ -159,3 +159,9 @@ def test_unregister_targets_a_tournament_the_bot_is_waiting_for():
     assert json.loads(args[6]) == {'manual': True, 'unregister': True, 'format': 'SNG', 'tournament_id': 7}
     with pytest.raises(Error, match='not waiting'):
         tasks(Database(entries=[waiting, playing])).create(1, {'kind': 'unregister', 'account_id': '4', 'table_id': 'T8'})
+
+
+def test_bluffpoker_tournament_ids_stay_text():
+    from backoffice.manual_tasks import tournament_id
+    assert tournament_id('T128001') == 128001
+    assert tournament_id('T865722c6-e5b8-4fc0-8756-d6a35f029e91') == '865722c6-e5b8-4fc0-8756-d6a35f029e91'
