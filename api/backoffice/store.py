@@ -354,9 +354,10 @@ class Store:
                 tier, freq, minutes = picked.get("stake", tier), picked.get("frequency", freq), picked.get("max_minutes", minutes)
                 post, rit = picked.get("post_bb_chance", post), picked.get("run_it_twice_chance", rit)
                 show = picked.get("show_cards_chance", show)
+                # New accounts are on: whoever adds accounts wants them played.
                 self.db.execute("""INSERT scheduler.AccountPolicy(BotAccountId,SiteId,StakeTier,PlayingFrequency,
-                    MaxPlaytimeMinutes,PostBbChance,RunItTwiceChance,ShowCardsChance,BuyInPolicyJson)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", aid, site_id, tier, freq, minutes, post, rit, show, json.dumps(weights))
+                    MaxPlaytimeMinutes,PostBbChance,RunItTwiceChance,ShowCardsChance,BuyInPolicyJson,IsEnabled)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,1)""", aid, site_id, tier, freq, minutes, post, rit, show, json.dumps(weights))
                 inserted = {"strategy", "stake", "frequency", "max_minutes", "post_bb_chance", "run_it_twice_chance", "show_cards_chance"}
                 for field, value in picked.items():
                     if field not in inserted:

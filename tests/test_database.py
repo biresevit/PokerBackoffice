@@ -69,7 +69,7 @@ def test_import_upsert_preserves_preferences_and_stale_version(store):
     assert monica["strategy"]==1
     assert monica["buy_in_weights"]==original["buy_in_weights"]
     assert monica["stake"]==original["stake"]
-    assert not next(r for r in rows if r["username"]=="__backoffice_rollback_test")["enabled"]
+    assert next(r for r in rows if r["username"]=="__backoffice_rollback_test")["enabled"]
     with pytest.raises(Error) as e:
         store.import_accounts(1,body,apply=True)
     assert e.value.status==409
