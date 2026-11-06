@@ -118,3 +118,21 @@ def test_csv_takes_the_login_after_the_username():
         parse_csv("username,password,email\nann,pw,not-an-email\n")
     with pytest.raises(Error, match="header"):
         parse_csv("password,username\npw,ann\n")
+
+
+def test_import_skips_accounts_of_another_site_and_imports_the_rest():
+    from backoffice.store import Context, Store
+
+    class Db:
+        def rows(self, sql, *args):
+            return [{"id": 443, "username": "guido66", "strategy": 5, "email": None, "password": None,
+                     "site_id": 1004, "deleted": None, "synthetic": False}]
+
+        def one(self, sql, *args):
+            return {"x": 1}
+
+    store = Store(Db(), Context(3, "aad", "simo", "operator"))
+    rows = parse_csv("username,password,email\nguido66,pw,g@x.io\nmatte_99,pw2,m@x.io\n")
+    plan = store._import_plan(1006, {"name": "BluffPoker", "version": 1}, rows, "upsert")
+    assert [(c["username"], c["kind"]) for c in plan["changes"]] == [("guido66", "skipped"), ("matte_99", "create")]
+    assert plan["counts"]["skipped"] == 1 and plan["counts"]["create"] == 1

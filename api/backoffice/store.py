@@ -307,7 +307,10 @@ class Store:
             if not old and row["username"].casefold().startswith("__schedule_demo_"):
                 raise Error(400, "The __schedule_demo_ prefix is reserved for simulation accounts")
             if old and old["site_id"] != site_id:
-                raise Error(409, f"Account {row['username']} requires an administrator ownership assignment")
+                # Played on another site: left as it is, the rest of the file still imports.
+                changes.append({"username": row["username"], "strategy": None, "kind": "skipped", "id": None,
+                                "reason": "Already used on another site"})
+                continue
             # A blank profile or login leaves an existing account's one as it is.
             login = old and row["email"] is not None and (row["email"], row["password"]) != (old["email"], old["password"])
             kind = ("create" if not old else "restore" if old["deleted"] else
@@ -323,7 +326,7 @@ class Store:
                     changes.append({"id": old["id"], "username": old["username"], "strategy": old["strategy"], "kind": "delete"})
         token = hashlib.sha256(json.dumps([site_id, site["version"], mode, changes], sort_keys=True).encode()).hexdigest()
         return {"changes": changes, "token": token,
-                "counts": {k: sum(r["kind"] == k for r in changes) for k in ("create", "update", "restore", "delete", "unchanged")},
+                "counts": {k: sum(r["kind"] == k for r in changes) for k in ("create", "update", "restore", "delete", "unchanged", "skipped")},
                 "version": site["version"]}
 
     def import_accounts(self, site_id, body, *, apply=False):
