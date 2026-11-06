@@ -50,7 +50,7 @@ class Sessions:
             OUTER APPLY(SELECT TOP(1) x.ActualEndUtc FROM scheduler.AccountSession x
                 WHERE x.BotAccountId=p.BotAccountId AND x.IsOpen=0 ORDER BY x.ActualEndUtc DESC) prior
             WHERE p.SiteId=%s AND p.DeletedUtc IS NULL AND p.IsEnabled=1 AND p.IsSynthetic=0 AND b.IsActive=1
-                AND p.CredentialRef IS NOT NULL
+                AND (p.CredentialRef IS NOT NULL OR b.LoginEmail IS NOT NULL AND b.LoginPassword IS NOT NULL)
             ORDER BY b.Username""",site_id)
 
     def options(self,site_id):
