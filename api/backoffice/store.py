@@ -465,8 +465,9 @@ class Store:
             FROM scheduler.LobbyTable t
             WHERE t.SiteId=%s
               AND (t.TableType='RING' OR t.TournamentState IN ('registering','running'))
-              AND t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())
-              AND (t.TableType IN ('SNG','MTT') OR t.FullSnapshotUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME()))
+              -- BluffPoker snapshots arrive every 60-85 s: a 60 s window made its tables flicker in and out.
+              AND t.ObservedUtc >= DATEADD(SECOND,-180,SYSUTCDATETIME())
+              AND (t.TableType IN ('SNG','MTT') OR t.FullSnapshotUtc >= DATEADD(SECOND,-180,SYSUTCDATETIME()))
               AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment o WHERE o.SiteId=t.SiteId AND o.MachineId=t.ObserverMachineId AND o.WorkerEpoch=t.ObserverEpoch AND o.IsReady=1 AND o.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()))
             ORDER BY t.BigBlind,t.TableName""", site_id)
         for row in rows:
@@ -562,7 +563,7 @@ class Store:
         self.site(site_id)
         rows = self.db.rows("""SELECT m.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,x.HostName AS host,
             COALESCE(st.Casino,m.Casino) AS registered_site,x.PublicIp AS public_ip,x.PrivateIp AS private_ip,
-            COALESCE(cap.MaxEntries,a.MaxEntries) AS max_entries,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
+            COALESCE(cap.MaxEntries,a.MaxEntries) AS max_entries,COALESCE(cap.IsEnabled,CONVERT(bit,1)) AS machine_enabled,a.IsReady AS ready,a.IsEnabled AS enabled,a.LastHeartbeatUtc AS heartbeat,
             a.MaintenanceTaskId AS maintenance_task_id,a.SiteId AS active_site_id,COALESCE(x.Version,1) AS version,
             latest.SampledUtc AS telemetry_at,latest.CpuPercent AS cpu_percent,
             latest.MemoryPercent AS memory_percent,latest.DiskPercent AS disk_percent,
@@ -717,7 +718,11 @@ class Store:
             raise Error(404, "Machine not found")
         if machine["Version"] != integer(body.get("version"), 1, 2**63 - 1, "version"):
             raise Error(409, "Machine settings changed. Refresh and try again.")
-        cap = integer(body.get("max_entries"), 1, 10000, "maximum entries")
+        # 0 entries keeps the PC connected without playing; a disabled PC joins nothing and scans no lobby.
+        cap = integer(body.get("max_entries"), 0, 10000, "maximum entries")
+        enabled = body.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise Error(400, "Invalid enabled flag")
         allowed = body.get("allowed_sites")
         if not isinstance(allowed, list) or len(allowed) > 100:
             raise Error(400, "Invalid allowed sites")
@@ -729,10 +734,10 @@ class Store:
             raise Error(409, "Leave active tables before removing their site from this machine")
         if not allowed:
             raise Error(400, "Choose at least one poker site for this machine")
-        self.db.execute("EXEC backoffice.SetMachineSites @CustomerId=%s,@MachineId=%s,@SiteIds=%s,@MaxEntries=%s",
-                        self.ctx.customer_id, machine_id, ",".join(map(str, allowed)), cap)
+        self.db.execute("EXEC backoffice.SetMachineSites @CustomerId=%s,@MachineId=%s,@SiteIds=%s,@MaxEntries=%s,@Enabled=%s",
+                        self.ctx.customer_id, machine_id, ",".join(map(str, allowed)), cap, enabled)
         self.db.execute("UPDATE backoffice.MachineMetadata SET Version=Version+1 WHERE MachineId=%s", machine_id)
-        self.audit("machine.update", machine_id, {"max_entries": cap, "allowed_sites": allowed})
+        self.audit("machine.update", machine_id, {"max_entries": cap, "enabled": enabled, "allowed_sites": allowed})
         return {"version": machine["Version"] + 1}
 
     def overview(self, site_id):

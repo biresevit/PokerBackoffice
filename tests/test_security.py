@@ -92,7 +92,7 @@ def test_live_tables_query_excludes_observations_older_than_60_seconds():
     db = DB()
     result = Store(db, Context(14004,"test","subject","operator")).tables(1)
     assert result["items"] == []
-    assert "t.ObservedUtc >= DATEADD(SECOND,-60,SYSUTCDATETIME())" in db.lobby_sql
+    assert "t.ObservedUtc >= DATEADD(SECOND,-180,SYSUTCDATETIME())" in db.lobby_sql
     assert "t.TournamentState IN ('registering','running')" in db.lobby_sql
 
 
