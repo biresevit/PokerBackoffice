@@ -52,7 +52,7 @@ class Updates:
             JOIN dbo.CustomerMachine m ON m.MachineId=t.MachineId LEFT JOIN backoffice.MachineMetadata x ON x.MachineId=t.MachineId
             WHERE r.SiteId=%s AND r.CustomerId=%s ORDER BY r.CreatedUtc DESC,t.Position""",site_id,self.ctx.customer_id)
         for r in rollouts:r['tasks']=[t for t in tasks if t['rollout_id']==r['id']]
-        return {'releases':releases,'machines':machines,'rollouts':rollouts,'setup_url':__import__('os').environ.get('BACKOFFICE_SETUP_URL'),'setup_admin':bool(self.db.one('SELECT Subject FROM backoffice.SetupAdministrator WHERE Provider=%s AND Subject=%s',self.ctx.provider,self.ctx.subject))}
+        return {'releases':releases,'machines':machines,'rollouts':rollouts,'setup_url':__import__('os').environ.get('BACKOFFICE_SETUP_URL'),'uninstall_url':__import__('os').environ.get('BACKOFFICE_UNINSTALL_URL'),'setup_admin':bool(self.db.one('SELECT Subject FROM backoffice.SetupAdministrator WHERE Provider=%s AND Subject=%s',self.ctx.provider,self.ctx.subject))}
 
     def enroll(self,site_id,body):
         operator(self.store,site_id)
