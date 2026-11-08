@@ -37,7 +37,7 @@ Build PokerController on Windows with the local worker modules included:
 
 ```powershell
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onedir --name PokerController --distpath artifacts\fleet-package --workpath artifacts\fleet-build --specpath artifacts --paths ..\ScheduleController --collect-submodules poker_controller --collect-submodules schedule_controller updater\worker_entry.py
-dotnet publish updater\PokerSuite.Updater.csproj -c Release -o artifacts\updater-agent
+dotnet publish updater\PokerSuite.Updater.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts\updater-agent
 ```
 
 Publish from PokerBackoffice with its development venv and the existing administrator environment:

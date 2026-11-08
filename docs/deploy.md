@@ -237,10 +237,11 @@ Only needed when the `PDecision` repository changed.
 
 ## 9. Updater agent and PokerSuite Setup (rare)
 
-- The agent version is hard-coded in `PokerController\updater\Program.cs` (`agent_version` in `Poll`/`Report`); keep `PokerSuite.Updater.csproj` `<Version>` in step.
-- Build the agent: `dotnet publish updater\PokerSuite.Updater.csproj -c Release -o artifacts\updater-agent` (from `PokerController`). Setup bundles the agent (`updater\setup\agent.zip`) and the Microsoft prerequisites (see "Building Setup with bundled prerequisites" in `docs\rolling-updates.md`).
+- The agent version is `AgentVersion` in `PokerController\updater\Program.cs`; keep `PokerSuite.Updater.csproj` `<Version>` in step. **Bump both for every agent change**: PCs compare the file version to decide whether to replace their updater.
+- Build the agent: `dotnet publish updater\PokerSuite.Updater.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts\updater-agent` (from `PokerController`). Setup bundles the agent (`updater\setup\agent.zip`) and the Microsoft prerequisites (see "Building Setup with bundled prerequisites" in `docs\rolling-updates.md`).
 - Publish a new initial installer: `PokerBackoffice\tools\publish_updater.py --version <version>`. New PCs download Setup from Machines → **Set up a new PC**, then the main administrator approves the pairing code there (`docs\pc-pairing-installation.md`).
-- Existing PCs get a new agent only by rerunning Setup on the PC; enrollment is preserved.
+- Existing PCs get a new agent with the next PC release (since agent 1.0.17): the release bundles the agent as the log collector (`_internal\diagnostics-agent`). When the worker starts it, a newer collector replaces the installed `C:\PokerSuite\Updater\PokerSuite.Updater.exe` once no installation is in progress. Only the updater process restarts (through its scheduled task); PDecision and PokerController keep running. `updater.log` shows "Replacing updater X with Y". Rerunning Setup still works and keeps the enrollment.
+- The agent checks every 10 s that PDecision and PokerController run (backing off to 5 minutes for an application that keeps stopping), in a loop of its own, so downloads and control-plane calls do not delay a restart.
 - `tools\verify_updater.py` tests process replacement and rollback with fake applications; it does not cover the Immediate (`forcing`) path.
 
 ## 10. Verification queries (read-only)
