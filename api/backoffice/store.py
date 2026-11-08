@@ -448,8 +448,10 @@ class Store:
             UpperInclusive AS upper_inclusive,TargetBasisPoints/100.0 AS [percent],
             TournamentMinBuyIn AS tournament_minimum,TournamentMaxBuyIn AS tournament_maximum
             FROM scheduler.StakeBand WHERE SiteId=%s ORDER BY MinBigBlind""", site_id)
+        extra = self.db.one("SELECT ExtraTableChancePercent AS value FROM scheduler.Site WHERE SiteId=%s", site_id)
         return {"bands": rows, "currency": site["currency"], "version": site["version"],
-                "excluded_tournaments": self.excluded_tournaments(site_id)}
+                "excluded_tournaments": self.excluded_tournaments(site_id),
+                "extra_table_percent": (extra or {}).get("value", 30)}
 
     def excluded_tournaments(self, site_id):
         """Tournament names this site's bots never register for (substrings, any case)."""
@@ -461,13 +463,17 @@ class Store:
         bands = stake_bands(body)
         excluded = tournament_exclusions(body.get("excluded_tournaments", self.excluded_tournaments(site_id)))
         self.db.execute("UPDATE scheduler.Site SET ExcludedTournamentNames=%s WHERE SiteId=%s", "\n".join(excluded), site_id)
+        extra_table = body.get("extra_table_percent")
+        if extra_table is not None:
+            extra_table = integer(extra_table, 0, 100, field="extra_table_percent")
+            self.db.execute("UPDATE scheduler.Site SET ExtraTableChancePercent=%s WHERE SiteId=%s", extra_table, site_id)
         for b in bands:
             self.db.execute("""UPDATE scheduler.StakeBand SET MinBigBlind=%s,MaxBigBlind=%s,UpperInclusive=%s,
                 TargetBasisPoints=%s,TournamentMinBuyIn=%s,TournamentMaxBuyIn=%s WHERE SiteId=%s AND Tier=%s""",
                 b["minimum"], b["maximum"], b["upper_inclusive"], b["basis_points"],
                 b["tournament_minimum"], b["tournament_maximum"], site_id, b["tier"])
         self.bump(site_id)
-        self.audit("stakes.update", site_id, {"bands": bands, "excluded_tournaments": excluded})
+        self.audit("stakes.update", site_id, {"bands": bands, "excluded_tournaments": excluded, "extra_table_percent": extra_table})
         return {"version": site["version"] + 1}
 
     def tables(self, site_id):
