@@ -7,6 +7,13 @@ from .validation import Error,integer
 PUBLIC_URL='https://lively-rock-032158003.4.azurestaticapps.net'
 
 
+def keeps_seats(agent_version):
+    """Agents from 1.0.18 restart PokerController without waiting for PDecision (seconds): an immediate update keeps
+    every entry and session open for the restarted worker to prove at the table."""
+    try:return tuple(int(x) for x in str(agent_version).split('.')[:3])>=(1,0,18)
+    except ValueError:return False
+
+
 def guid(value,field='ID'):
     try:return str(uuid.UUID(str(value)))
     except (ValueError,TypeError,AttributeError):raise Error(400,f'Invalid {field}')
@@ -192,25 +199,37 @@ def agent_request(db,machine_id,headers,body,action):
         elif phase=='staged' and status in ('preparing','draining','forcing'):
             db.execute('UPDATE scheduler.MachineUpdateTask SET Staged=1 WHERE TaskId=%s',task['TaskId'])
         elif phase=='force_stopped' and status=='forcing':
-            # The operator chose Immediate: open entries/sessions were cut off, not confirmed absent from
-            # the table, so this is recorded as a forced interruption rather than reusing the 'software_update'/
-            # 'reconciled_absent' reasons that mean a fresh seat snapshot proved the bot had actually left.
-            # Tournament registrations (TableId 'T...') stay open: EvenBet keeps them through the restart and the
-            # new worker resumes them, or closes those EvenBet no longer holds. Ring seats are cut off.
-            db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id)
-            db.execute("UPDATE scheduler.Entry SET Status='uncertain' WHERE MachineId=%s AND IsOpen=1",machine_id)
-            db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=SYSUTCDATETIME(),EndReason='forced_update' WHERE MachineId=%s AND IsOpen=1",machine_id)
-            db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1",machine_id)
-            db.execute('DELETE scheduler.AccountLease WHERE MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',machine_id)
+            if keeps_seats(body.get('agent_version')):
+                # Agents from 1.0.18 restart PokerController within seconds, while the poker site still holds the
+                # seats (BluffPoker ~29 s, EvenBet ~45 s). Every entry and session stays open; the restarted worker
+                # proves each seat at the table and adopts it, or closes it when the bot is gone. Closing them here
+                # dropped all of Simo's 73 sessions on a 6-second immediate update (2026-11-08).
+                db.execute("UPDATE scheduler.Entry SET Status='uncertain' WHERE MachineId=%s AND IsOpen=1",machine_id)
+                db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1",machine_id)
+            else:
+                # The operator chose Immediate: open entries/sessions were cut off, not confirmed absent from
+                # the table, so this is recorded as a forced interruption rather than reusing the 'software_update'/
+                # 'reconciled_absent' reasons that mean a fresh seat snapshot proved the bot had actually left.
+                # Tournament registrations (TableId 'T...') stay open: EvenBet keeps them through the restart and the
+                # new worker resumes them, or closes those EvenBet no longer holds. Ring seats are cut off.
+                db.execute("UPDATE scheduler.Entry SET IsOpen=0,Status='closed',ClosedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id)
+                db.execute("UPDATE scheduler.Entry SET Status='uncertain' WHERE MachineId=%s AND IsOpen=1",machine_id)
+                db.execute("UPDATE scheduler.AccountSession SET IsOpen=0,ActualEndUtc=SYSUTCDATETIME(),EndReason='forced_update' WHERE MachineId=%s AND IsOpen=1",machine_id)
+                db.execute("UPDATE scheduler.Command SET Status='expired',IsOpen=0,ResultCode='forced_update',UpdatedUtc=SYSUTCDATETIME() WHERE MachineId=%s AND IsOpen=1",machine_id)
+                db.execute('DELETE scheduler.AccountLease WHERE MachineId=%s AND NOT EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=AccountLease.BotAccountId AND e.IsOpen=1)',machine_id)
             # A killed worker never marks itself stopped; its fresh heartbeat would make the new worker
             # refuse to start ('Machine has a live worker') for 90 seconds and fail the update.
             db.execute('UPDATE scheduler.MachineAssignment SET IsReady=0 WHERE MachineId=%s',machine_id)
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='stopping',UpdatedUtc=%s,Detail='Applications were force-stopped immediately; open sessions were cut off, not confirmed absent from the table.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='installing' and status in ('stopping','installing'):
             if task['RolloutStatus']=='paused':raise Error(409,'Rollout is paused')
-            # Only an immediate update (force_stopped) reaches this with open entries: its kept tournament registrations.
-            if db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id):raise Error(409,'The machine still has open table entries')
-            if db.one('SELECT TOP(1) SessionId FROM scheduler.AccountSession WHERE MachineId=%s AND IsOpen=1',machine_id):raise Error(409,'The machine still has open sessions')
+            # Only an immediate update (force_stopped) reaches this with open entries: its kept tournament registrations,
+            # and with an agent from 1.0.18 every entry and session, all marked uncertain for the restarted worker.
+            if keeps_seats(body.get('agent_version')):
+                if db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1 AND Status<>'uncertain'",machine_id):raise Error(409,'The machine still has open table entries')
+            else:
+                if db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1 AND TableId NOT LIKE 'T%%'",machine_id):raise Error(409,'The machine still has open table entries')
+                if db.one('SELECT TOP(1) SessionId FROM scheduler.AccountSession WHERE MachineId=%s AND IsOpen=1',machine_id):raise Error(409,'The machine still has open sessions')
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='installing',UpdatedUtc=%s,Detail='Restarting applications.' WHERE TaskId=%s",now,task['TaskId'])
         elif phase=='verifying' and status in ('installing','verifying'):
             db.execute("UPDATE scheduler.MachineUpdateTask SET Status='verifying',UpdatedUtc=%s,Detail='Checking application startup and health.' WHERE TaskId=%s",now,task['TaskId'])
