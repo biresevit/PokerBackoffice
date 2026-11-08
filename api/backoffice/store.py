@@ -203,15 +203,19 @@ class Store:
             COALESCE(d.SessionSeconds,0) AS played_seconds,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries,
-            COALESCE(x.Played,0) AS entries_played
+            COALESCE(x.RingTables,0) AS active_tables,COALESCE(x.Tournaments,0) AS active_tournaments,
+            COALESCE(x.RingTables,0)+COALESCE(x.Tournaments,0) AS active_entries
             FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
             LEFT JOIN scheduler.AccountDay d ON d.SiteId=p.SiteId AND d.BotAccountId=p.BotAccountId AND d.LocalDate=%s
-            -- Every entry the bot really had on this site: a ring seat it sat down in, or an SNG/MTT registration
-            -- the site accepted (open or finished).
-            LEFT JOIN (SELECT BotAccountId,COUNT(*) AS Played FROM scheduler.Entry
-                WHERE SiteId=%s AND (SeatedUtc IS NOT NULL OR (TableId LIKE 'T%%' AND LastConfirmedUtc IS NOT NULL))
-                GROUP BY BotAccountId) x ON x.BotAccountId=p.BotAccountId
-            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY COALESCE(x.Played,0) DESC,b.Username""", today, site_id, site_id)
+            -- What the bot plays right now: ring tables it is seated at, and SNG/MTT entries it is registered for
+            -- (accepted by the site) or playing.
+            LEFT JOIN (SELECT BotAccountId,
+                    SUM(CASE WHEN TableId NOT LIKE 'T%%' AND Status IN ('seated','sitting_out','draining') THEN 1 ELSE 0 END) AS RingTables,
+                    SUM(CASE WHEN TableId LIKE 'T%%' AND (Status IN ('seated','sitting_out','draining')
+                        OR (Status='joining' AND LastConfirmedUtc IS NOT NULL)) THEN 1 ELSE 0 END) AS Tournaments
+                FROM scheduler.Entry WHERE SiteId=%s AND IsOpen=1 GROUP BY BotAccountId) x ON x.BotAccountId=p.BotAccountId
+            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL
+            ORDER BY COALESCE(x.RingTables,0)+COALESCE(x.Tournaments,0) DESC,b.Username""", today, site_id, site_id)
         for row in rows:
             row["buy_in_weights"] = json.loads(row.pop("buy_in_json"))
             row["profile"] = PROFILES.get(row["strategy"], "Custom")
