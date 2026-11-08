@@ -202,10 +202,16 @@ class Store:
             p.BuyInPolicyJson AS buy_in_json,p.IsSynthetic AS synthetic,p.IsEnabled AS enabled,
             COALESCE(d.SessionSeconds,0) AS played_seconds,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
-            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries
+            (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries,
+            COALESCE(x.Played,0) AS entries_played
             FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
             LEFT JOIN scheduler.AccountDay d ON d.SiteId=p.SiteId AND d.BotAccountId=p.BotAccountId AND d.LocalDate=%s
-            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY b.Username""", today, site_id)
+            -- Every entry the bot really had on this site: a ring seat it sat down in, or an SNG/MTT registration
+            -- the site accepted (open or finished).
+            LEFT JOIN (SELECT BotAccountId,COUNT(*) AS Played FROM scheduler.Entry
+                WHERE SiteId=%s AND (SeatedUtc IS NOT NULL OR (TableId LIKE 'T%%' AND LastConfirmedUtc IS NOT NULL))
+                GROUP BY BotAccountId) x ON x.BotAccountId=p.BotAccountId
+            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL ORDER BY COALESCE(x.Played,0) DESC,b.Username""", today, site_id, site_id)
         for row in rows:
             row["buy_in_weights"] = json.loads(row.pop("buy_in_json"))
             row["profile"] = PROFILES.get(row["strategy"], "Custom")
