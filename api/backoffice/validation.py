@@ -197,7 +197,7 @@ def account_settings(body):
         "rebuy_tournament_chance": number(body.get("rebuy_tournament_chance"), 0, 1, "tournament rebuy chance"),
         "show_cards_chance": number(body.get("show_cards_chance"), 0, 1, "show cards chance"),
         "addon_chance": number(body.get("addon_chance"), 0, 1, "add-on chance"),
-        "games": games(body.get("games", list(GAMES))),
+        "games": games(body.get("games", "NLH,PLO4,PLO5")),
         "max_sng_rebuys": integer(body.get("max_sng_rebuys", 3), 0, 100, "maximum SNG rebuys"),
         "max_mtt_rebuys": integer(body.get("max_mtt_rebuys", 3), 0, 100, "maximum MTT rebuys"),
         "max_sng_reentries": integer(body.get("max_sng_reentries", 1), 0, 100, "maximum SNG re-entries"),
@@ -205,13 +205,14 @@ def account_settings(body):
         "buy_in_weights": normalized}
 
 
-# Game formats an account may play (ring tables; tournaments are NLH only).
-GAMES = ("NLH", "PLO4", "PLO5")
+# Game formats an account may play at ring tables (tournaments are NLH only): all, NLH only, or PLO only.
+GAME_CHOICES = {"NLH,PLO4,PLO5": "All formats", "NLH": "NLH only", "PLO4,PLO5": "PLO4 and PLO5 only"}
+GAMES = tuple(GAME_CHOICES)
 
 
 def games(value):
-    if isinstance(value, str):
-        value = [v for v in value.split(",") if v]
-    if not isinstance(value, list) or not value or any(v not in GAMES for v in value):
-        raise Error(400, "Choose at least one game format: NLH, PLO4 or PLO5")
-    return [g for g in GAMES if g in value]
+    if isinstance(value, list):
+        value = ",".join(g for g in ("NLH", "PLO4", "PLO5") if g in value)
+    if value not in GAME_CHOICES:
+        raise Error(400, "Game formats must be all formats, NLH only, or PLO4 and PLO5 only")
+    return value

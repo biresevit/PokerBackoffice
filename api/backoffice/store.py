@@ -251,7 +251,7 @@ class Store:
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
             values["max_sng_entries"], values["max_mtt_entries"], values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
             values["rebuy_tournament_chance"], values["show_cards_chance"], values["addon_chance"],
-            json.dumps(values["buy_in_weights"]), ",".join(values["games"]), values["max_sng_rebuys"], values["max_mtt_rebuys"],
+            json.dumps(values["buy_in_weights"]), values["games"], values["max_sng_rebuys"], values["max_mtt_rebuys"],
             values["max_sng_reentries"], values["max_mtt_reentries"], site_id, account_id)
         if enabled is not None:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
