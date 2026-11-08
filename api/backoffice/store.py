@@ -189,7 +189,9 @@ class Store:
         rows = self.db.rows("""SELECT b.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,
             b.IsActive AS active,p.StakeTier AS stake,p.PlayingFrequency AS frequency,
             p.MaxPlaytimeMinutes AS max_minutes,p.MaxTables AS max_tables,
-            p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,
+            p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,p.AllowedGames AS games,
+            p.MaxSngRebuys AS max_sng_rebuys,p.MaxMttRebuys AS max_mtt_rebuys,
+            p.MaxSngReentries AS max_sng_reentries,p.MaxMttReentries AS max_mtt_reentries,
             p.SessionMinMinutes AS session_min_minutes,p.SessionMaxMinutes AS session_max_minutes,
             p.SessionCooldownMinutes AS session_cooldown_minutes,
             p.PostBbChance AS post_bb_chance,p.RunItTwiceChance AS run_it_twice_chance,
@@ -244,11 +246,13 @@ class Store:
         self.db.execute("""UPDATE scheduler.AccountPolicy SET StakeTier=%s,PlayingFrequency=%s,
             MaxPlaytimeMinutes=%s,MaxTables=%s,MaxSngEntries=%s,MaxMttEntries=%s,PostBbChance=%s,RunItTwiceChance=%s,
             RebuyRingChance=%s,RebuyTournamentChance=%s,ShowCardsChance=%s,AddonChance=%s,BuyInPolicyJson=%s,
+            AllowedGames=%s,MaxSngRebuys=%s,MaxMttRebuys=%s,MaxSngReentries=%s,MaxMttReentries=%s,
             UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=%s AND BotAccountId=%s""",
             values["stake"], values["frequency"], values["max_minutes"], values["max_tables"],
             values["max_sng_entries"], values["max_mtt_entries"], values["post_bb_chance"], values["run_it_twice_chance"], values["rebuy_ring_chance"],
             values["rebuy_tournament_chance"], values["show_cards_chance"], values["addon_chance"],
-            json.dumps(values["buy_in_weights"]), site_id, account_id)
+            json.dumps(values["buy_in_weights"]), ",".join(values["games"]), values["max_sng_rebuys"], values["max_mtt_rebuys"],
+            values["max_sng_reentries"], values["max_mtt_reentries"], site_id, account_id)
         if enabled is not None:
             self.db.execute("UPDATE scheduler.AccountPolicy SET IsEnabled=%s WHERE SiteId=%s AND BotAccountId=%s", enabled, site_id, account_id)
         if durations:
