@@ -1,39 +1,44 @@
-// Side panel of the live table window: manual Join / Leave tasks for this table, and its chat.
-// Tasks and chat messages go through the normal APIs, so the bot's PC executes them like the scheduler's own.
+// Live table window side panels: Tasks (left: manual Leave / Join for this table) and Chat (right).
+// Each refreshes only its data; inputs and selections are built once, so typing is never interrupted.
 export function installLivePanel({$, esc, siteApi, toast, state, date}) {
- let tableId = null, open = false, timer = null, busy = false, lastChatId = 0;
+ let tableId = null;
  const chatSupported = () => state.site?.platform !== 'BluffPokerPlatform';
- const root = document.createElement('aside');
- root.className = 'live-panel';
- root.hidden = true;
- root.innerHTML = `<div class="live-panel-head"><strong>Bots &amp; chat</strong><button class="icon-button" id="live-panel-close" aria-label="Close">×</button></div>
-  <section><h3>Our bots at this table</h3><div id="live-panel-seated" class="live-panel-list"><p class="sub">Loading…</p></div></section>
-  <section><h3>Join this table</h3><div id="live-panel-join"></div></section>
-  <section class="live-panel-chat"><h3>Chat</h3><div id="live-panel-chat"></div></section>`;
- document.body.appendChild(root);
- const button = document.createElement('button');
- button.className = 'button small live-panel-toggle';
- button.textContent = 'Bots & chat';
- button.onclick = () => toggle(!open);
- root.querySelector('#live-panel-close').onclick = () => toggle(false);
 
- function toggle(value) {
-  open = value; root.hidden = !open; button.classList.toggle('active', open);
-  clearInterval(timer);
-  if (open) { refresh(); timer = setInterval(refresh, 4000); }
+ function drawer(side, title, body) {
+  const root = document.createElement('aside');
+  root.className = `live-panel live-panel-${side}`;
+  root.hidden = true;
+  root.innerHTML = `<div class="live-panel-head"><strong>${title}</strong><button class="icon-button" aria-label="Close">×</button></div>${body}`;
+  document.body.appendChild(root);
+  const button = document.createElement('button');
+  button.className = `button small live-panel-toggle live-panel-toggle-${side}`;
+  button.textContent = title;
+  const panel = {root, button, open: false, timer: null, refresh: async () => {}};
+  panel.toggle = value => {
+   panel.open = value; root.hidden = !value; button.classList.toggle('active', value);
+   clearInterval(panel.timer);
+   if (value) { panel.refresh(); panel.timer = setInterval(() => panel.refresh(), 4000); }
+  };
+  button.onclick = () => panel.toggle(!panel.open);
+  root.querySelector('.live-panel-head button').onclick = () => panel.toggle(false);
+  return panel;
  }
 
+ // ---- Tasks ----------------------------------------------------------------------------------------------------
+ const tasks = drawer('left', 'Tasks', `<section><h3>Our bots at this table</h3><div id="live-tasks-seated" class="live-panel-list"><p class="sub">Loading…</p></div></section>
+  <section><h3>Join this table</h3><div class="live-panel-form"><select id="live-tasks-join-bot" hidden></select><button class="button small primary" id="live-tasks-join-go" hidden>Join</button></div><p class="sub" id="live-tasks-join-note">Loading…</p></section>`);
+ let tasksBusy = false;
  async function task(kind, accountId) {
   try {
    const r = await siteApi('tasks', 'POST', {kind, account_id: accountId, table_id: tableId, start_session: kind === 'join'});
    toast(`${kind === 'join' ? 'Join' : 'Leave'} task created for ${r.bot}; its PC carries it out shortly.`);
-   refresh();
+   tasks.refresh();
   } catch (error) { toast(error.message); }
  }
-
- async function refresh() {
-  if (busy || !open || !tableId) return;
-  busy = true;
+ $('#live-tasks-join-go').onclick = () => task('join', +$('#live-tasks-join-bot').value);
+ tasks.refresh = async () => {
+  if (tasksBusy || !tasks.open || !tableId) return;
+  tasksBusy = true;
   try {
    const [options, candidates] = await Promise.all([siteApi('tasks/options'), siteApi(`tasks/join-candidates?table_id=${encodeURIComponent(tableId)}`)]);
    const seated = [];
@@ -41,49 +46,74 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
     const here = s.tables.find(e => String(e.table_id) === String(tableId));
     if (here) seated.push({s, e: here});
    }
-   const joinable = candidates.accounts || [];
-   $('#live-panel-seated').innerHTML = seated.length ? seated.map(({s, e}) => `<div class="live-panel-row"><span><strong>${esc(s.username)}</strong><span class="sub">${esc(e.status)}${e.leaving ? ' · leaving' : ''}</span></span>${e.leaving || !['seated', 'sitting_out'].includes(e.status) ? '' : `<button class="button small" data-leave="${s.id}">Leave</button>`}</div>`).join('') : '<p class="sub">None of our bots sits at this table.</p>';
-   $('#live-panel-join').innerHTML = joinable.length
-    ? `<div class="live-panel-form"><select id="live-panel-join-bot">${joinable.map(a => `<option value="${a.id}">${esc(a.username)} · ${esc(a.profile)} · ${esc(a.stake)}</option>`).join('')}</select><button class="button small primary" id="live-panel-join-go">Join</button></div>`
-    : `<p class="sub">${esc(candidates.reason || 'No bot can join this table now.')}</p>`;
-   root.querySelectorAll('[data-leave]').forEach(b => b.onclick = () => task('leave', +b.dataset.leave));
-   const go = $('#live-panel-join-go');
-   if (go) go.onclick = () => task('join', +$('#live-panel-join-bot').value);
-   await refreshChat(seated);
+   $('#live-tasks-seated').innerHTML = seated.length ? seated.map(({s, e}) => `<div class="live-panel-row"><span><strong>${esc(s.username)}</strong><span class="sub">${esc(s.profile || '')} · ${esc(s.tier)} · ${esc(e.status)}${e.leaving ? ' · leaving' : ''}</span></span>${e.leaving || !['seated', 'sitting_out'].includes(e.status) ? '' : `<button class="button small" data-leave="${s.id}">Leave</button>`}</div>`).join('') : '<p class="sub">None of our bots sits at this table.</p>';
+   tasks.root.querySelectorAll('[data-leave]').forEach(b => b.onclick = () => task('leave', +b.dataset.leave));
+   const accounts = candidates.accounts || [], select = $('#live-tasks-join-bot'), chosen = select.value;
+   const html = accounts.map(a => `<option value="${a.id}">${esc(a.username)} · ${esc(a.profile)} · ${esc(a.stake)}</option>`).join('');
+   if (select.dataset.html !== html) {   // only when the list changed: an open list or a choice is not reset
+    select.innerHTML = html; select.dataset.html = html;
+    if (accounts.some(a => String(a.id) === chosen)) select.value = chosen;
+   }
+   select.hidden = $('#live-tasks-join-go').hidden = !accounts.length;
+   $('#live-tasks-join-note').textContent = accounts.length ? '' : (candidates.reason || 'No bot can join this table now.');
   } catch (error) {
-   $('#live-panel-seated').innerHTML = `<p class="notice error">${esc(error.message)}</p>`;
-  } finally { busy = false; }
- }
+   $('#live-tasks-join-note').textContent = error.message;
+  } finally { tasksBusy = false; }
+ };
 
- async function refreshChat(seated) {
-  const box = $('#live-panel-chat');
-  if (!chatSupported()) { box.innerHTML = '<p class="sub">Table chat is not available on BluffPoker.</p>'; return; }
-  const [d, summary] = await Promise.all([siteApi(`chat/${encodeURIComponent(tableId)}`), siteApi('chat')]);
-  const bots = ((summary.items || []).find(t => String(t.table_id) === String(tableId))?.bots || []).filter(b => b.chat_ready);
-  const draft = $('#live-panel-chat-text')?.value || '';
-  const latest = d.items.length ? d.items[d.items.length - 1].id : 0;
-  box.innerHTML = `<div class="live-panel-messages" id="live-panel-messages">${d.items.map(m => `<p class="${m.is_human ? 'human' : 'bot'}"><strong>${esc(m.author)}</strong> ${esc(m.body)}<span class="sub">${date(m.received || m.posted)}</span></p>`).join('') || '<p class="sub">No messages yet.</p>'}</div>`
-   + (bots.length ? `<form class="live-panel-form" id="live-panel-chat-form"><select id="live-panel-chat-bot">${bots.map(b => `<option value="${esc(b.entry_id)}">${esc(b.bot)}</option>`).join('')}</select><input id="live-panel-chat-text" maxlength="2000" placeholder="Message as this bot" value="${esc(draft)}"><button class="button small primary">Send</button></form>`
-    : `<p class="sub">${seated.length ? 'Our bots here are not connected to chat yet.' : 'A bot must sit at this table to send a message.'}</p>`);
-  const list = $('#live-panel-messages');
-  if (latest !== lastChatId) { list.scrollTop = list.scrollHeight; lastChatId = latest; }
-  const form = $('#live-panel-chat-form');
-  if (form) form.onsubmit = async e => {
-   e.preventDefault();
-   const text = $('#live-panel-chat-text').value.trim();
-   if (!text) return;
-   try {
-    await siteApi(`chat/${encodeURIComponent(tableId)}/send`, 'POST', {request_id: crypto.randomUUID(), entry_id: $('#live-panel-chat-bot').value, text});
-    $('#live-panel-chat-text').value = '';
-    toast('Message queued; the bot sends it at the table.');
-    refresh();
-   } catch (error) { toast(error.message); }
-  };
- }
+ // ---- Chat -------------------------------------------------------------------------------------------------------
+ const chat = drawer('right', 'Chat', `<div id="live-chat-body"><div class="live-panel-messages live-chat-messages" id="live-chat-messages"><p class="sub">Loading…</p></div>
+  <form class="live-panel-form" id="live-chat-form"><select id="live-chat-bot"></select><input id="live-chat-text" maxlength="2000" placeholder="Message as this bot" autocomplete="off"><button class="button small primary">Send</button></form>
+  <p class="sub" id="live-chat-note"></p></div>`);
+ let chatBusy = false, lastChatId = null;
+ $('#live-chat-form').onsubmit = async e => {
+  e.preventDefault();
+  const input = $('#live-chat-text'), text = input.value.trim();
+  if (!text || !$('#live-chat-bot').value) return;
+  try {
+   await siteApi(`chat/${encodeURIComponent(tableId)}/send`, 'POST', {request_id: crypto.randomUUID(), entry_id: $('#live-chat-bot').value, text});
+   input.value = '';
+   toast('Message queued; the bot sends it at the table.');
+   chat.refresh();
+  } catch (error) { toast(error.message); }
+ };
+ chat.refresh = async () => {
+  if (chatBusy || !chat.open || !tableId) return;
+  if (!chatSupported()) {
+   $('#live-chat-body').innerHTML = '<p class="sub">Table chat is not available on BluffPoker.</p>';
+   return;
+  }
+  chatBusy = true;
+  try {
+   const [d, summary] = await Promise.all([siteApi(`chat/${encodeURIComponent(tableId)}`), siteApi('chat')]);
+   const latest = d.items.length ? d.items[d.items.length - 1].id : 0;
+   if (latest !== lastChatId) {   // new messages only: the list is not redrawn while nothing changed
+    const list = $('#live-chat-messages'), atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 20 || lastChatId === null;
+    list.innerHTML = d.items.map(m => `<p class="${m.is_human ? 'human' : 'bot'}"><strong>${esc(m.author)}</strong> ${esc(m.body)}<span class="sub">${date(m.received || m.posted)}</span></p>`).join('') || '<p class="sub">No messages yet.</p>';
+    if (atBottom) list.scrollTop = list.scrollHeight;
+    lastChatId = latest;
+   }
+   const bots = ((summary.items || []).find(t => String(t.table_id) === String(tableId))?.bots || []).filter(b => b.chat_ready);
+   const select = $('#live-chat-bot'), chosen = select.value;
+   const html = bots.map(b => `<option value="${esc(b.entry_id)}">${esc(b.bot)}</option>`).join('');
+   if (select.dataset.html !== html) {
+    select.innerHTML = html; select.dataset.html = html;
+    if (bots.some(b => b.entry_id === chosen)) select.value = chosen;
+   }
+   $('#live-chat-form').hidden = !bots.length;
+   $('#live-chat-note').textContent = bots.length ? '' : 'A bot of ours must sit at this table, connected to chat, to send a message.';
+  } catch (error) {
+   $('#live-chat-note').textContent = error.message;
+  } finally { chatBusy = false; }
+ };
 
  return {
-  button,
-  setTable(id) { if (id && String(id) !== String(tableId)) { tableId = id; if (open) refresh(); } },
-  close() { toggle(false); root.remove(); },
+  tasksButton: tasks.button,
+  chatButton: chat.button,
+  setTable(id) {
+   if (!id || String(id) === String(tableId)) return;
+   tableId = id; lastChatId = null;
+   tasks.refresh(); chat.refresh();
+  },
  };
 }
