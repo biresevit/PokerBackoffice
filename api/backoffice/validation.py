@@ -206,7 +206,8 @@ def account_settings(body):
 
 
 # Game formats an account may play at ring tables (tournaments are NLH only): all, NLH only, or PLO only.
-GAME_CHOICES = {"NLH,PLO4,PLO5": "All formats", "NLH": "NLH only", "PLO4,PLO5": "PLO4 and PLO5 only"}
+GAME_CHOICES = {"NLH,PLO4,PLO5": "All formats", "NLH": "NLH only", "PLO4,PLO5": "PLO4 and PLO5 only",
+                "TOURNAMENTS": "MTT/SNG only"}
 GAMES = tuple(GAME_CHOICES)
 
 
@@ -214,5 +215,5 @@ def games(value):
     if isinstance(value, list):
         value = ",".join(g for g in ("NLH", "PLO4", "PLO5") if g in value)
     if value not in GAME_CHOICES:
-        raise Error(400, "Game formats must be all formats, NLH only, or PLO4 and PLO5 only")
+        raise Error(400, "Game formats must be all formats, NLH only, PLO4 and PLO5 only, or MTT/SNG only")
     return value

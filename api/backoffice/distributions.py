@@ -27,7 +27,7 @@ FIELDS = {
     "max_tables": {"label": "Maximum tables", "table": "policy", "column": "MaxTables", "kind": "integer", "min": 1, "max": 100},
     "max_sng_entries": {"label": "Maximum SNG entries at once", "table": "policy", "column": "MaxSngEntries", "kind": "integer", "min": 1, "max": 100},
     "max_mtt_entries": {"label": "Maximum MTT entries at once", "table": "policy", "column": "MaxMttEntries", "kind": "integer", "min": 1, "max": 100},
-    "games": {"label": "Game formats at ring tables", "table": "policy", "column": "AllowedGames", "kind": "choice",
+    "games": {"label": "Game formats", "table": "policy", "column": "AllowedGames", "kind": "choice",
               "choices": [[k, v] for k, v in GAME_CHOICES.items()]},
     "max_sng_rebuys": {"label": "Maximum rebuys per SNG", "table": "policy", "column": "MaxSngRebuys", "kind": "integer", "min": 0, "max": 100},
     "max_mtt_rebuys": {"label": "Maximum rebuys per MTT", "table": "policy", "column": "MaxMttRebuys", "kind": "integer", "min": 0, "max": 100},
