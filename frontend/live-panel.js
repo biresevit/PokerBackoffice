@@ -4,6 +4,7 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
  let tableId = null;
  const chatSupported = () => state.site?.platform !== 'BluffPokerPlatform';
 
+ const panels = [];
  function drawer(side, title, body) {
   const root = document.createElement('aside');
   root.className = `live-panel live-panel-${side}`;
@@ -15,17 +16,19 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
   button.textContent = title;
   const panel = {root, button, open: false, timer: null, refresh: async () => {}};
   panel.toggle = value => {
+   if (value) panels.filter(other => other !== panel && other.open).forEach(other => other.toggle(false));  // one panel at a time
    panel.open = value; root.hidden = !value; button.classList.toggle('active', value);
    clearInterval(panel.timer);
    if (value) { panel.refresh(); panel.timer = setInterval(() => panel.refresh(), 4000); }
   };
   button.onclick = () => panel.toggle(!panel.open);
   root.querySelector('.live-panel-head button').onclick = () => panel.toggle(false);
-  return panel;
+  panels.push(panel);
+ return panel;
  }
 
  // ---- Tasks ----------------------------------------------------------------------------------------------------
- const tasks = drawer('left', 'Tasks', `<section><h3>Our bots at this table</h3><div id="live-tasks-seated" class="live-panel-list"><p class="sub">Loading…</p></div></section>
+ const tasks = drawer('right', 'Tasks', `<section><h3>Our bots at this table</h3><div id="live-tasks-seated" class="live-panel-list"><p class="sub">Loading…</p></div></section>
   <section><h3>Join this table</h3><div class="live-panel-form"><select id="live-tasks-join-bot" hidden></select><button class="button small primary" id="live-tasks-join-go" hidden>Join</button></div><p class="sub" id="live-tasks-join-note">Loading…</p></section>`);
  let tasksBusy = false;
  async function task(kind, accountId) {
@@ -63,7 +66,7 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
 
  // ---- Chat -------------------------------------------------------------------------------------------------------
  const chat = drawer('right', 'Chat', `<div id="live-chat-body"><div class="live-panel-messages live-chat-messages" id="live-chat-messages"><p class="sub">Loading…</p></div>
-  <form class="live-panel-form" id="live-chat-form"><select id="live-chat-bot"></select><input id="live-chat-text" maxlength="2000" placeholder="Message as this bot" autocomplete="off"><button class="button small primary">Send</button></form>
+  <form class="live-chat-form" id="live-chat-form"><label><span class="sub">Send as</span><select id="live-chat-bot"></select></label><textarea id="live-chat-text" maxlength="2000" rows="3" placeholder="Message" autocomplete="off"></textarea><button class="button small primary">Send</button></form>
   <p class="sub" id="live-chat-note"></p></div>`);
  let chatBusy = false, lastChatId = null;
  $('#live-chat-form').onsubmit = async e => {
@@ -76,6 +79,10 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
    toast('Message queued; the bot sends it at the table.');
    chat.refresh();
   } catch (error) { toast(error.message); }
+ };
+ // Enter sends, Shift+Enter starts a new line.
+ $('#live-chat-text').onkeydown = e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#live-chat-form').requestSubmit(); }
  };
  chat.refresh = async () => {
   if (chatBusy || !chat.open || !tableId) return;
