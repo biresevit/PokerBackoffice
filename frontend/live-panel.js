@@ -25,7 +25,7 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
 
  async function task(kind, accountId) {
   try {
-   const r = await siteApi('tasks', 'POST', {kind, account_id: accountId, table_id: tableId});
+   const r = await siteApi('tasks', 'POST', {kind, account_id: accountId, table_id: tableId, start_session: kind === 'join'});
    toast(`${kind === 'join' ? 'Join' : 'Leave'} task created for ${r.bot}; its PC carries it out shortly.`);
    refresh();
   } catch (error) { toast(error.message); }
@@ -35,17 +35,17 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
   if (busy || !open || !tableId) return;
   busy = true;
   try {
-   const options = await siteApi('tasks/options');
-   const seated = [], joinable = [];
+   const [options, candidates] = await Promise.all([siteApi('tasks/options'), siteApi(`tasks/join-candidates?table_id=${encodeURIComponent(tableId)}`)]);
+   const seated = [];
    for (const s of options.sessions) {
     const here = s.tables.find(e => String(e.table_id) === String(tableId));
     if (here) seated.push({s, e: here});
-    else if ((s.join_tables || []).map(String).includes(String(tableId))) joinable.push(s);
    }
+   const joinable = candidates.accounts || [];
    $('#live-panel-seated').innerHTML = seated.length ? seated.map(({s, e}) => `<div class="live-panel-row"><span><strong>${esc(s.username)}</strong><span class="sub">${esc(e.status)}${e.leaving ? ' · leaving' : ''}</span></span>${e.leaving || !['seated', 'sitting_out'].includes(e.status) ? '' : `<button class="button small" data-leave="${s.id}">Leave</button>`}</div>`).join('') : '<p class="sub">None of our bots sits at this table.</p>';
    $('#live-panel-join').innerHTML = joinable.length
-    ? `<div class="live-panel-form"><select id="live-panel-join-bot">${joinable.map(s => `<option value="${s.id}">${esc(s.username)} · ${esc(s.tier)} · ${s.tables.length}/${s.max_tables} tables${s.machine_ready ? '' : ' · PC offline'}</option>`).join('')}</select><button class="button small primary" id="live-panel-join-go">Join</button></div>`
-    : '<p class="sub">No bot can join now: a bot needs an open session, this table\'s stake tier and game, a free seat and a table below its maximum. Start a session on the Sessions page.</p>';
+    ? `<div class="live-panel-form"><select id="live-panel-join-bot">${joinable.map(a => `<option value="${a.id}">${esc(a.username)} · ${esc(a.profile)} · ${esc(a.stake)}</option>`).join('')}</select><button class="button small primary" id="live-panel-join-go">Join</button></div>`
+    : `<p class="sub">${esc(candidates.reason || 'No bot can join this table now.')}</p>`;
    root.querySelectorAll('[data-leave]').forEach(b => b.onclick = () => task('leave', +b.dataset.leave));
    const go = $('#live-panel-join-go');
    if (go) go.onclick = () => task('join', +$('#live-panel-join-bot').value);

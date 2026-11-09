@@ -218,6 +218,8 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 tasks=ManualTasks(store)
                 if method=="GET" and tail=="options":
                     return response(tasks.options(sid))
+                if method=="GET" and tail=="join-candidates":
+                    return response(tasks.join_candidates(sid,request.query.get('table_id')))
                 if method=="POST" and tail is None:
                     return response(tasks.create(sid,body),201)
                 raise Error(404,'Task endpoint not found')

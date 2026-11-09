@@ -8,7 +8,7 @@ import random
 import uuid
 from datetime import datetime,timedelta,timezone
 from .updates import operator
-from .validation import Error, is_excluded_tournament
+from .validation import Error, PROFILES, is_excluded_tournament
 
 
 def tournament_id(table_id):
@@ -84,6 +84,63 @@ class ManualTasks:
             s.pop('epoch',None)
         return {'sessions':sessions,'tables':tables,'tournaments':tournaments}
 
+    def join_candidates(self,site_id,table_id):
+        """Every account that can join this ring table now: enabled with a login, the table's stake tier and game,
+        not at the table, below its maximum tables, and either in a session (it joins on that session's PC) or free
+        to start one (not cooling down; the session starts on the PC with the most free entries)."""
+        self.store.site(site_id)
+        table=next((t for t in self.tables(site_id) if str(t['id'])==str(table_id)),None)
+        if not table:return {'table':None,'accounts':[],'reason':'This ring table was not seen in the lobby in the last minute.'}
+        if table['occupied']+table['reserved']>=table['seats']:
+            return {'table':table,'accounts':[],'reason':'The table has no free seat.'}
+        rows=self.db.rows("""SELECT p.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,p.StakeTier AS stake,
+            p.MaxTables AS max_tables,p.AllowedGames AS games,
+            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.BotAccountId=p.BotAccountId AND e.IsOpen=1) AS open_entries,
+            CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM scheduler.Entry e WHERE e.BotAccountId=p.BotAccountId AND e.IsOpen=1
+                AND e.SiteId=p.SiteId AND e.TableId=%s) THEN 1 ELSE 0 END) AS at_table,
+            s.SessionId AS session_id,
+            CONVERT(bit,CASE WHEN s.SessionId IS NULL AND prior.ActualEndUtc IS NOT NULL
+                AND DATEADD(minute,p.SessionCooldownMinutes,prior.ActualEndUtc)>SYSUTCDATETIME() THEN 1 ELSE 0 END) AS cooling_down
+            FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
+            OUTER APPLY(SELECT TOP(1) x.SessionId FROM scheduler.AccountSession x WHERE x.BotAccountId=p.BotAccountId AND x.IsOpen=1) s
+            OUTER APPLY(SELECT TOP(1) x.ActualEndUtc FROM scheduler.AccountSession x
+                WHERE x.BotAccountId=p.BotAccountId AND x.IsOpen=0 ORDER BY x.ActualEndUtc DESC) prior
+            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL AND p.IsEnabled=1 AND p.IsSynthetic=0 AND b.IsActive=1
+                AND (p.CredentialRef IS NOT NULL OR b.LoginEmail IS NOT NULL AND b.LoginPassword IS NOT NULL)
+            ORDER BY b.Username""",str(table_id),site_id)
+        ready={s['id'] for s in self.sessions(site_id) if s['machine_ready']}
+        accounts=[]
+        for r in rows:
+            games=str(r['games'] or 'NLH,PLO4,PLO5').split(',')
+            if (r['stake']!=table['tier'] or table['game'] not in games or r['at_table'] or r['open_entries']>=r['max_tables']
+                    or r['cooling_down'] or r['session_id'] and r['id'] not in ready):
+                continue
+            accounts.append({'id':r['id'],'username':r['username'],'profile':PROFILES.get(r['strategy'],'Custom'),'stake':r['stake']})
+        return {'table':table,'accounts':accounts,
+                'reason':None if accounts else f"No enabled {table['tier']}-stakes bot that plays {table['game']} is free to join."}
+
+    def start_session(self,site_id,account_id):
+        """A session for a Join task of an account without one: on the online PC with the most free entries, for
+        the account's usual session length (the Sessions page's choice of PC)."""
+        from .sessions import Sessions
+        sessions=Sessions(self.store)
+        policy=self.db.one("""SELECT p.SessionMinMinutes AS lo,p.SessionMaxMinutes AS hi FROM scheduler.AccountPolicy p
+            WHERE p.BotAccountId=%s AND p.SiteId=%s AND p.DeletedUtc IS NULL AND p.IsEnabled=1""",account_id,site_id)
+        if not policy:raise Error(404,'That bot is not enabled for this site')
+        machines=[m for m in sessions.machines(site_id) if m['available'] and m['capacity']-m['entries']>0]
+        if not machines:raise Error(409,'No PC is online with a free entry')
+        most_free=max(m['capacity']-m['entries'] for m in machines)
+        machine=random.SystemRandom().choice([m for m in machines if m['capacity']-m['entries']==most_free])
+        if self.db.one('SELECT SessionId FROM scheduler.AccountSession WHERE BotAccountId=%s AND IsOpen=1',account_id):
+            return
+        minutes=random.SystemRandom().randint(int(policy['lo'] or 30),max(int(policy['lo'] or 30),int(policy['hi'] or 60)))
+        session_id=str(uuid.uuid4())
+        self.db.execute("""INSERT scheduler.AccountSession(SessionId,SiteId,BotAccountId,MachineId,WorkerEpoch,
+            StartedUtc,PlannedEndUtc,IsOpen,IsManual,RequestedBy)
+            VALUES(%s,%s,%s,%s,%s,SYSUTCDATETIME(),DATEADD(minute,%s,SYSUTCDATETIME()),1,1,%s)""",
+            session_id,site_id,account_id,machine['id'],machine['epoch'],minutes,self.store.ctx.subject)
+        self.store.audit('sessions.create',session_id,{'account':account_id,'machine':machine['id'],'for':'join task'})
+
     def create(self,site_id,body):
         site=operator(self.store,site_id)
         kind=str(body.get('kind') or '')
@@ -94,6 +151,10 @@ class ManualTasks:
         # The scheduler takes this lock before it creates a join or leave for the account.
         self.db.one('SELECT BotAccountId FROM scheduler.AccountLease WITH(UPDLOCK,HOLDLOCK) WHERE BotAccountId=%s',account_id)
         session=next((s for s in self.sessions(site_id) if s['id']==account_id),None)
+        if not session and kind=='join' and body.get('start_session') is True:
+            # Live table: a bot without a session joins on any available PC.
+            self.start_session(site_id,account_id)
+            session=next((s for s in self.sessions(site_id) if s['id']==account_id),None)
         if not session:raise Error(409,'That bot has no open session. Create a session first.')
         if not session['machine_ready']:raise Error(409,f"{session['machine'] or session['machine_id']} is not online and ready")
         version=self.db.one('SELECT ConfigVersion FROM scheduler.Site WHERE SiteId=%s',site_id)['ConfigVersion']
