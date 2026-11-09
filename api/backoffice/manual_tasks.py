@@ -49,7 +49,7 @@ class ManualTasks:
         bands=self.db.rows('SELECT Tier,MinBigBlind,MaxBigBlind,UpperInclusive FROM scheduler.StakeBand WHERE SiteId=%s',site_id)
         rows=self.db.rows("""SELECT TableId AS id,TableName AS name,GameType AS game,BigBlind AS big_blind,MaxSeats AS seats,
             OccupiedSeats AS occupied FROM scheduler.LobbyTable WHERE SiteId=%s AND IsOpen=1 AND TableType='RING'
-            AND GameType IN ('NLH','PLO4') AND ObservedUtc>=DATEADD(second,-60,SYSUTCDATETIME()) ORDER BY BigBlind,TableName""",site_id)
+            AND GameType IN ('NLH','PLO4','PLO5') AND ObservedUtc>=DATEADD(second,-60,SYSUTCDATETIME()) ORDER BY BigBlind,TableName""",site_id)
         for t in rows:
             t['tier']=next((b['Tier'] for b in bands if b['MinBigBlind']<=t['big_blind']<b['MaxBigBlind']
                             or b['UpperInclusive'] and t['big_blind']==b['MaxBigBlind']),None)
