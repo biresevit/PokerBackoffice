@@ -28,8 +28,9 @@ class ManualTasks:
         """Bots with a started, open session on a PC that is online, with their current tables."""
         rows=self.db.rows("""SELECT s.SessionId AS session_id,s.BotAccountId AS id,b.Username AS username,p.StakeTier AS tier,
             p.MaxTables AS max_tables,p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,s.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,
-            a.WorkerEpoch AS epoch,CONVERT(bit,CASE WHEN a.IsEnabled=1 AND a.IsReady=1 AND a.MaintenanceTaskId IS NULL
-                AND a.WorkerEpoch IS NOT NULL AND a.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()) THEN 1 ELSE 0 END) AS machine_ready
+            a.WorkerEpoch AS epoch,CONVERT(bit,CASE WHEN a.IsReady=1 AND a.MaintenanceTaskId IS NULL
+                AND a.WorkerEpoch IS NOT NULL AND a.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()) THEN 1 ELSE 0 END) AS machine_online,
+            a.IsEnabled AS machine_enabled
             FROM scheduler.AccountSession s JOIN dbo.BotAccount b ON b.BotAccountId=s.BotAccountId
             JOIN scheduler.AccountPolicy p ON p.BotAccountId=s.BotAccountId AND p.SiteId=s.SiteId
             JOIN scheduler.MachineAssignment a ON a.MachineId=s.MachineId AND a.SiteId=s.SiteId
@@ -41,7 +42,12 @@ class ManualTasks:
             CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM scheduler.Command c WHERE c.EntryId=e.EntryId AND c.Kind='leave' AND c.IsOpen=1) THEN 1 ELSE 0 END) AS leaving
             FROM scheduler.Entry e LEFT JOIN scheduler.LobbyTable t ON t.SiteId=e.SiteId AND t.TableId=e.TableId
             WHERE e.SiteId=%s AND e.IsOpen=1""",site_id)
-        for r in rows:r['tables']=[e for e in entries if e['account_id']==r['id']]
+        for r in rows:
+            r['tables']=[e for e in entries if e['account_id']==r['id']]
+            # Online: its worker runs and can carry out tasks. Ready: online and switched on (Machines page), so it
+            # takes new tables. A switched-off PC still leaves tables and unregisters.
+            r.setdefault('machine_online',r.get('machine_ready',False));r.setdefault('machine_enabled',True)
+            r['machine_ready']=bool(r['machine_online'] and r['machine_enabled'])
         return rows
 
     def tables(self,site_id):
@@ -156,7 +162,10 @@ class ManualTasks:
             self.start_session(site_id,account_id)
             session=next((s for s in self.sessions(site_id) if s['id']==account_id),None)
         if not session:raise Error(409,'That bot has no open session. Create a session first.')
-        if not session['machine_ready']:raise Error(409,f"{session['machine'] or session['machine_id']} is not online and ready")
+        machine=session['machine'] or session['machine_id']
+        if not session['machine_online']:raise Error(409,f"{machine} is not online")
+        if kind in ('join','register_sng','register_mtt') and not session['machine_enabled']:
+            raise Error(409,f"{machine} is switched off on the Machines page, so it takes no new tables")
         version=self.db.one('SELECT ConfigVersion FROM scheduler.Site WHERE SiteId=%s',site_id)['ConfigVersion']
         now=utcnow();command_id=str(uuid.uuid4())
         if kind=='leave':
