@@ -27,7 +27,7 @@ class ManualTasks:
     def sessions(self,site_id):
         """Bots with a started, open session on a PC that is online, with their current tables."""
         rows=self.db.rows("""SELECT s.SessionId AS session_id,s.BotAccountId AS id,b.Username AS username,p.StakeTier AS tier,
-            p.MaxTables AS max_tables,p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,s.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,
+            b.Strategy AS strategy,p.MaxTables AS max_tables,p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,s.MachineId AS machine_id,COALESCE(x.HostName,m.Description) AS machine,
             a.WorkerEpoch AS epoch,CONVERT(bit,CASE WHEN a.IsReady=1 AND a.MaintenanceTaskId IS NULL
                 AND a.WorkerEpoch IS NOT NULL AND a.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()) THEN 1 ELSE 0 END) AS machine_online,
             a.IsEnabled AS machine_enabled
@@ -47,15 +47,17 @@ class ManualTasks:
             # Online: its worker runs and can carry out tasks. Ready: online and switched on (Machines page), so it
             # takes new tables. A switched-off PC still leaves tables and unregisters.
             r.setdefault('machine_online',r.get('machine_ready',False));r.setdefault('machine_enabled',True)
+            r['profile']=PROFILES.get(r.get('strategy'),'Custom')
             r['machine_ready']=bool(r['machine_online'] and r['machine_enabled'])
         return rows
 
     def tables(self,site_id):
-        """Fresh ring tables of the supported games with their stake tier."""
+        """Ring tables of the supported games seen in the last 3 minutes, with their stake tier. BluffPoker's lobby
+        snapshots are often more than a minute apart (Live Tables keeps 3 minutes too)."""
         bands=self.db.rows('SELECT Tier,MinBigBlind,MaxBigBlind,UpperInclusive FROM scheduler.StakeBand WHERE SiteId=%s',site_id)
         rows=self.db.rows("""SELECT TableId AS id,TableName AS name,GameType AS game,BigBlind AS big_blind,MaxSeats AS seats,
             OccupiedSeats AS occupied FROM scheduler.LobbyTable WHERE SiteId=%s AND IsOpen=1 AND TableType='RING'
-            AND GameType IN ('NLH','PLO4','PLO5') AND ObservedUtc>=DATEADD(second,-60,SYSUTCDATETIME()) ORDER BY BigBlind,TableName""",site_id)
+            AND GameType IN ('NLH','PLO4','PLO5') AND ObservedUtc>=DATEADD(second,-180,SYSUTCDATETIME()) ORDER BY BigBlind,TableName""",site_id)
         for t in rows:
             t['tier']=next((b['Tier'] for b in bands if b['MinBigBlind']<=t['big_blind']<b['MaxBigBlind']
                             or b['UpperInclusive'] and t['big_blind']==b['MaxBigBlind']),None)
@@ -96,7 +98,7 @@ class ManualTasks:
         to start one (not cooling down; the session starts on the PC with the most free entries)."""
         self.store.site(site_id)
         table=next((t for t in self.tables(site_id) if str(t['id'])==str(table_id)),None)
-        if not table:return {'table':None,'accounts':[],'reason':'This ring table was not seen in the lobby in the last minute.'}
+        if not table:return {'table':None,'accounts':[],'reason':'This ring table was not seen in the lobby in the last 3 minutes.'}
         if table['occupied']+table['reserved']>=table['seats']:
             return {'table':table,'accounts':[],'reason':'The table has no free seat.'}
         rows=self.db.rows("""SELECT p.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,p.StakeTier AS stake,
@@ -242,7 +244,7 @@ class ManualTasks:
             usable=[t for t in tables.values() if t['tier']==session['tier'] and t['id'] not in seated and t['occupied']+t['reserved']<t['seats']]
             choice=str(body.get('table_id') or 'any')
             if choice=='any':
-                if not usable:raise Error(409,f"No {session['tier']}-stakes table with a free seat was observed in the last minute")
+                if not usable:raise Error(409,f"No {session['tier']}-stakes table with a free seat was observed in the last 3 minutes")
                 # Like the scheduler: prefer populated tables without making the choice fixed.
                 table_row=random.SystemRandom().choices(usable,weights=[(t['occupied']+1)**2 for t in usable],k=1)[0]
             else:
