@@ -1,15 +1,22 @@
-"""Decision settings keyed by the authorized customer and registered poker site."""
+"""Decision settings keyed by the authorized customer and registered poker site.
+
+Card sharing and the solver strategy against humans are each switched on or off. When on, a feature is used in ring
+games from a minimum big blind, in SNG/MTT from a minimum buy-in (empty: every stake) and, whatever the game or
+stake, in every hand with one of its listed players.
+"""
 import hashlib
 import json
 from decimal import Decimal
 
-from .validation import Error, choice, number
+from .validation import Error, number
 
-FEATURES = {'help_players': 'CardSharing', 'profile_players': 'Profile'}
+FEATURES = {'help_players': 'CardSharing', 'solver_players': 'Solver'}
 MAX_PLAYERS = 500
-DEFAULTS = {'use_help': False, 'help_min_big_blind': None, 'help_vs_humans': 'Everyone',
-            'profile_vs_humans': 'Everyone', 'profile_max_stake': None, 'profile_min_big_blind': None,
-            'profile_in_tournaments': True}
+SWITCHES = ('use_help', 'solver_vs_humans')
+MINIMUMS = {'help_min_big_blind': 'card sharing minimum big blind', 'help_min_buy_in': 'card sharing minimum buy-in',
+            'solver_min_big_blind': 'solver minimum big blind', 'solver_min_buy_in': 'solver minimum buy-in'}
+DEFAULTS = {'use_help': False, 'help_min_big_blind': None, 'help_min_buy_in': None,
+            'solver_vs_humans': False, 'solver_min_big_blind': None, 'solver_min_buy_in': None}
 
 
 def version(row, players):
@@ -21,7 +28,7 @@ def plain(value):
     return float(value) if isinstance(value, Decimal) else value
 
 
-def min_big_blind(value, field):
+def minimum(value, field):
     if value is None or value == '':
         return None
     if isinstance(value, bool):
@@ -51,9 +58,8 @@ class CasinoSettings:
 
     def row(self, casino, lock=False):
         hint = 'WITH(UPDLOCK,HOLDLOCK)' if lock else ''
-        return self.db.one(f'''SELECT UseHelp AS use_help,HelpMinBigBlind AS help_min_big_blind,HelpVsHumans AS help_vs_humans,
-            ProfileVsHumans AS profile_vs_humans,ProfileMaxStake AS profile_max_stake,ProfileMinBigBlind AS profile_min_big_blind,
-            ProfileInTournaments AS profile_in_tournaments,
+        return self.db.one(f'''SELECT UseHelp AS use_help,HelpMinBigBlind AS help_min_big_blind,HelpMinBuyIn AS help_min_buy_in,
+            SolverVsHumans AS solver_vs_humans,SolverMinBigBlind AS solver_min_big_blind,SolverMinBuyIn AS solver_min_buy_in,
             UpdatedUtc AS updated FROM dbo.CasinoSettings {hint} WHERE Casino=%s AND CustomerId=%s''', casino, self.store.ctx.customer_id)
 
     def players(self, casino):
@@ -73,31 +79,28 @@ class CasinoSettings:
         if self.store.ctx.role != 'operator': raise Error(403, 'Your account has view-only access')
         allowed = {'version', *DEFAULTS, *FEATURES}
         if set(body) - allowed: raise Error(400, 'Unknown casino setting')
-        for key in ('use_help', 'profile_in_tournaments'):
+        for key in SWITCHES:
             if type(body.get(key)) is not bool: raise Error(400, 'Choose on or off for ' + key.replace('_', ' '))
-        help_humans = choice(body.get('help_vs_humans', 'Everyone'), ('Everyone', 'ListedPlayers'), 'card sharing against humans')
-        humans = choice(body.get('profile_vs_humans'), ('Everyone', 'WeakHumans', 'ListedPlayers', 'Never'), 'profile strategy against humans')
-        stake = body.get('profile_max_stake')
-        if stake is not None: choice(stake, ('Micro', 'Low', 'Mid', 'High'), 'maximum profile stake')
-        help_min = min_big_blind(body.get('help_min_big_blind'), 'card sharing minimum big blind')
-        profile_min = min_big_blind(body.get('profile_min_big_blind'), 'profile minimum big blind')
+        values = {key: minimum(body.get(key), label) for key, label in MINIMUMS.items()}
+        values.update({key: body[key] for key in SWITCHES})
         players = {key: player_list(body.get(key, []), label) for key, label in
-                   (('help_players', 'card sharing player list'), ('profile_players', 'profile player list'))}
-        if body['use_help'] and help_humans == 'ListedPlayers' and not players['help_players']:
-            raise Error(400, 'Add at least one player to the card sharing list, or use card sharing in every hand')
-        if humans == 'ListedPlayers' and not players['profile_players']:
-            raise Error(400, 'Add at least one player to the profile list, or choose another profile option')
+                   (('help_players', 'card sharing player list'), ('solver_players', 'solver player list'))}
         row = self.row(site['name'], lock=True); before = self.players(site['name'])
         if body.get('version') != version(row, before):
             raise Error(409, 'Casino settings changed since this page was loaded. Reload before saving.')
-        values = (body['use_help'], help_min, help_humans, humans, stake, profile_min, body['profile_in_tournaments'],
-                  site['name'], self.store.ctx.customer_id)
+        # The legacy columns keep PDecision builds before 1.0.0.50 close to the new settings:
+        # solver on = the strong strategy against all humans, off = profiles against everyone.
+        solver = values['solver_vs_humans']
+        args = (values['use_help'], values['help_min_big_blind'], values['help_min_buy_in'], solver,
+                values['solver_min_big_blind'], values['solver_min_buy_in'], 'Never' if solver else 'Everyone', not solver,
+                site['name'], self.store.ctx.customer_id)
         if row:
-            self.db.execute('''UPDATE dbo.CasinoSettings SET UseHelp=%s,HelpMinBigBlind=%s,HelpVsHumans=%s,ProfileVsHumans=%s,
-                ProfileMaxStake=%s,ProfileMinBigBlind=%s,ProfileInTournaments=%s,UpdatedUtc=SYSUTCDATETIME() WHERE Casino=%s AND CustomerId=%s''', *values)
+            self.db.execute('''UPDATE dbo.CasinoSettings SET UseHelp=%s,HelpMinBigBlind=%s,HelpMinBuyIn=%s,SolverVsHumans=%s,
+                SolverMinBigBlind=%s,SolverMinBuyIn=%s,ProfileVsHumans=%s,ProfileInTournaments=%s,HelpVsHumans='Everyone',
+                ProfileMaxStake=NULL,ProfileMinBigBlind=NULL,UpdatedUtc=SYSUTCDATETIME() WHERE Casino=%s AND CustomerId=%s''', *args)
         else:
-            self.db.execute('''INSERT dbo.CasinoSettings(UseHelp,HelpMinBigBlind,HelpVsHumans,ProfileVsHumans,ProfileMaxStake,
-                ProfileMinBigBlind,ProfileInTournaments,Casino,CustomerId) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)''', *values)
+            self.db.execute('''INSERT dbo.CasinoSettings(UseHelp,HelpMinBigBlind,HelpMinBuyIn,SolverVsHumans,SolverMinBigBlind,
+                SolverMinBuyIn,ProfileVsHumans,ProfileInTournaments,Casino,CustomerId) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''', *args)
         for key, feature in FEATURES.items():
             if players[key] == before[key]: continue
             self.db.execute('DELETE dbo.CasinoSettingsPlayer WHERE Casino=%s AND CustomerId=%s AND Feature=%s',
@@ -105,8 +108,6 @@ class CasinoSettings:
             for name in players[key]:
                 self.db.execute('INSERT dbo.CasinoSettingsPlayer(CustomerId,Casino,Feature,PlayerName) VALUES(%s,%s,%s,%s)',
                                 self.store.ctx.customer_id, site['name'], feature, name)
-        after = {'use_help': body['use_help'], 'help_min_big_blind': help_min, 'help_vs_humans': help_humans,
-                 'profile_vs_humans': humans, 'profile_max_stake': stake, 'profile_min_big_blind': profile_min,
-                 'profile_in_tournaments': body['profile_in_tournaments'], **players}
+        after = {**{k: values[k] for k in DEFAULTS}, **players}
         self.store.audit('casino.settings.save', site_id, {'casino': site['name'], 'before': {**(row or {}), **before}, 'after': after})
         return self.get(site_id)

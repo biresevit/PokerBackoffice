@@ -6,37 +6,45 @@ Operators edit only their own customer/site row; viewers are read-only. Casino
 and customer keys come from authorization context and cannot be supplied by the
 browser. Optimistic concurrency checks and before/after auditing remain in place.
 
-Defaults for each newly enabled customer/site are:
+Defaults for each newly enabled customer/site: card sharing Off (`UseHelp = 0`), solver strategy vs humans Off
+(`SolverVsHumans = 0`), no minimums, no listed players.
 
-- `UseHelp = 0`
-- `ProfileVsHumans = Everyone`
-- `ProfileMaxStake = NULL`
-- `ProfileInTournaments = 1`
-- `HelpMinBigBlind = NULL`, `HelpVsHumans = Everyone`, `ProfileMinBigBlind = NULL`, no listed players
+## Card sharing and solver strategy vs humans (migration 020)
 
-## Conditions for card sharing and account profiles (migration 019)
+Both features have the same settings:
 
-Each feature can be limited further. A customer sets them on the same page:
-
-| Setting | Card sharing | Account profiles against humans |
+| Setting | Card sharing | Use solver strategy vs humans |
 |---|---|---|
-| Minimum big blind (table currency, ring games only; empty = every stake) | `HelpMinBigBlind` | `ProfileMinBigBlind` |
-| Only in hands with a listed player | `HelpVsHumans = ListedPlayers` | `ProfileVsHumans = ListedPlayers` |
-| Player list | `dbo.CasinoSettingsPlayer`, `Feature = CardSharing` | `dbo.CasinoSettingsPlayer`, `Feature = Profile` |
+| On / Off | `UseHelp` | `SolverVsHumans` |
+| Minimum big blind, ring games (table currency; empty = every stake) | `HelpMinBigBlind` | `SolverMinBigBlind` |
+| Minimum buy-in, SNG and MTT (as in the lobby; empty = every buy-in) | `HelpMinBuyIn` | `SolverMinBuyIn` |
+| Listed players | `dbo.CasinoSettingsPlayer`, `Feature = CardSharing` | `dbo.CasinoSettingsPlayer`, `Feature = Solver` |
 
-Example: card sharing On, minimum big blind 4, only hands with listed players `player1`, `player2`, `player3`.
-Card sharing is then used only at ring tables with a big blind of at least 4 and only while one of those players
-is still in the hand. In tournaments the minimum big blind is ignored, because tournament blinds are chips.
+When a feature is On, PDecision uses it
 
-Names are compared the same way as `dbo.BotWinner` names (`StrategyUtil.ConvertName`, ignoring case). The list
-of each feature is saved together with the settings and is part of the optimistic-concurrency version. A
-"listed players" mode with an empty list is rejected (card sharing only while it is On). Account profiles at
-tables without humans are unaffected by these conditions, as before.
+- in ring games with a big blind of at least its minimum big blind,
+- in SNGs and MTTs with a buy-in of at least its minimum buy-in,
+- and, whatever the game, blind level or buy-in, in every hand where one of its listed players is still in the hand.
 
-PDecision 1.0.0.49 reads the new columns (`CasinoSettings_List` returns them after the original five) and the
-lists (`CasinoSettingsPlayer_List`). Older builds ignore the new columns, but cannot parse
-`ProfileVsHumans = ListedPlayers`: their refresh then keeps the previous values, and at startup they fall back
-to the built-in rules. Roll PDecision 49 out to every PC of a customer before choosing that option.
+Off means never. Solver strategy Off = the bots play their account profiles against every human; On = the
+solver (strong) strategy against humans wherever the conditions above hold, and the profiles everywhere else.
+Card sharing keeps its existing check that a human is in the hand. To use a feature only against the listed players,
+set both minimums above the stakes the bots play.
+
+Example: card sharing On, minimum big blind 4, minimum buy-in 20, listed `player1`, `player2`. Card sharing is
+used at ring tables from a big blind of 4, in tournaments from a buy-in of 20, and in any game with `player1` or
+`player2` in the hand.
+
+PokerController sends the tournament buy-in with each tournament hand (`TournamentBuyIn`, from the lobby scan of
+the PC). A tournament whose buy-in is unknown does not reach a set minimum buy-in. Names are compared the same way
+as `dbo.BotWinner` names (`StrategyUtil.ConvertName`, ignoring case). The lists are part of the optimistic-concurrency
+version, and a list is kept while its feature is Off.
+
+Migration 020 replaced the profile options of migration 019 (Everyone / tables without known winners / listed players /
+Never, maximum stake, profiles in SNG and MTT). It set `SolverVsHumans = 1` where profiles were `Never`. The older
+columns stay for PDecision builds before 1.0.0.50, and every save writes the closest equivalent there: solver On =
+`ProfileVsHumans = Never` (the strong strategy against every human, whatever the minimums), Off = `Everyone`. Those
+builds also ignore the minimum buy-in and the player lists.
 
 Inserting/updating `scheduler.Site` or activating a `dbo.CustomerMachine`
 registration initializes the pair if missing. `SchedulingEnabled` pauses traffic;

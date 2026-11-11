@@ -24,7 +24,7 @@ def test_customer_defaults_site_enable_isolation_and_legacy_reader():
             mid=db.one("INSERT dbo.CustomerMachine(CustomerId,MacAddress,Casino,Platform) VALUES(%s,%s,'Evenbet','EvenBet'); SELECT CONVERT(int,SCOPE_IDENTITY()) AS id",cid,mac)['id'];machines.append(mid)
             assert db.one("SELECT UseHelp,ProfileVsHumans,ProfileMaxStake,ProfileInTournaments FROM dbo.CasinoSettings WHERE CustomerId=%s AND Casino='Evenbet'",cid)==defaults
         a,b=ids
-        db.execute("EXEC dbo.CasinoSettings_Upsert @Casino='Evenbet',@CustomerId=%s,@UseHelp=1,@ProfileVsHumans='Never',@ProfileMaxStake='High',@ProfileInTournaments=0",a)
+        db.execute("EXEC dbo.CasinoSettings_Upsert @Casino='Evenbet',@CustomerId=%s,@UseHelp=1,@SolverVsHumans=1,@SolverMinBigBlind=4,@SolverMinBuyIn=20",a)
         db.execute('UPDATE dbo.CustomerMachine SET IsActive=0 WHERE MachineId=%s; UPDATE dbo.CustomerMachine SET IsActive=1 WHERE MachineId=%s',machines[0],machines[0])
         for casino in ('Evenbet','BluffPoker'):
             db.execute("INSERT scheduler.Site(CustomerId,Casino,Platform,TimeZone,CurrencyCode) VALUES(%s,%s,'EvenBet','Europe/Budapest','DEMO')",a,casino)
@@ -32,7 +32,9 @@ def test_customer_defaults_site_enable_isolation_and_legacy_reader():
         assert db.one("SELECT UseHelp,ProfileVsHumans,ProfileMaxStake,ProfileInTournaments FROM dbo.CasinoSettings WHERE CustomerId=%s AND Casino='BluffPoker'",a)==defaults
         aa=db.rows("EXEC dbo.CasinoSettings_List @CustomerId=%s,@Casino='Evenbet'",a)
         bb=db.rows("EXEC dbo.CasinoSettings_List @CustomerId=%s,@Casino='Evenbet'",b)
-        assert len(aa)==len(bb)==1 and aa[0]['UseHelp'] and aa[0]['ProfileVsHumans']=='Never'
+        assert len(aa)==len(bb)==1 and aa[0]['UseHelp'] and aa[0]['ProfileVsHumans']=='Never' and not aa[0]['ProfileInTournaments']
+        assert aa[0]['SolverVsHumans'] and aa[0]['SolverMinBigBlind']==4 and aa[0]['SolverMinBuyIn']==20 and aa[0]['HelpMinBuyIn'] is None
+        assert not bb[0]['SolverVsHumans'] and bb[0]['SolverMinBigBlind'] is None
         assert {k:bb[0][k] for k in defaults}==defaults
         legacy=db.rows('EXEC dbo.CasinoSettings_List')
         assert all({k:r[k] for k in defaults}==defaults for r in legacy)
