@@ -12,6 +12,31 @@ Defaults for each newly enabled customer/site are:
 - `ProfileVsHumans = Everyone`
 - `ProfileMaxStake = NULL`
 - `ProfileInTournaments = 1`
+- `HelpMinBigBlind = NULL`, `HelpVsHumans = Everyone`, `ProfileMinBigBlind = NULL`, no listed players
+
+## Conditions for card sharing and account profiles (migration 019)
+
+Each feature can be limited further. A customer sets them on the same page:
+
+| Setting | Card sharing | Account profiles against humans |
+|---|---|---|
+| Minimum big blind (table currency, ring games only; empty = every stake) | `HelpMinBigBlind` | `ProfileMinBigBlind` |
+| Only in hands with a listed player | `HelpVsHumans = ListedPlayers` | `ProfileVsHumans = ListedPlayers` |
+| Player list | `dbo.CasinoSettingsPlayer`, `Feature = CardSharing` | `dbo.CasinoSettingsPlayer`, `Feature = Profile` |
+
+Example: card sharing On, minimum big blind 4, only hands with listed players `player1`, `player2`, `player3`.
+Card sharing is then used only at ring tables with a big blind of at least 4 and only while one of those players
+is still in the hand. In tournaments the minimum big blind is ignored, because tournament blinds are chips.
+
+Names are compared the same way as `dbo.BotWinner` names (`StrategyUtil.ConvertName`, ignoring case). The list
+of each feature is saved together with the settings and is part of the optimistic-concurrency version. A
+"listed players" mode with an empty list is rejected (card sharing only while it is On). Account profiles at
+tables without humans are unaffected by these conditions, as before.
+
+PDecision 1.0.0.49 reads the new columns (`CasinoSettings_List` returns them after the original five) and the
+lists (`CasinoSettingsPlayer_List`). Older builds ignore the new columns, but cannot parse
+`ProfileVsHumans = ListedPlayers`: their refresh then keeps the previous values, and at startup they fall back
+to the built-in rules. Roll PDecision 49 out to every PC of a customer before choosing that option.
 
 Inserting/updating `scheduler.Site` or activating a `dbo.CustomerMachine`
 registration initializes the pair if missing. `SchedulingEnabled` pauses traffic;

@@ -48,7 +48,7 @@ def main():
         permissions={
             "backoffice.ContactRateLimit":"SELECT,INSERT,UPDATE,DELETE",
             "dbo.Customer":"SELECT","dbo.CustomerMachine":"SELECT","dbo.CustomerHandHistory":"SELECT",
-            "dbo.CasinoSettings":"SELECT,INSERT,UPDATE",
+            "dbo.CasinoSettings":"SELECT,INSERT,UPDATE","dbo.CasinoSettingsPlayer":"SELECT,INSERT,DELETE",
             "backoffice.MachineLogRequest":"SELECT,INSERT,UPDATE",
             "reporting.HandProcessing":"SELECT","reporting.HandPlayerResult":"SELECT",
             "dbo.BotAccount":"SELECT,INSERT,UPDATE","backoffice.Membership":"SELECT",
