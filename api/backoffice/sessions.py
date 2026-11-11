@@ -30,8 +30,8 @@ class Sessions:
     def machines(self,site_id):
         return self.db.rows("""SELECT a.MachineId AS id,COALESCE(x.HostName,m.Description) AS name,a.WorkerEpoch AS epoch,
             COALESCE(c.MaxEntries,a.MaxEntries)-(SELECT COUNT(*) FROM scheduler.Entry o
-                WHERE o.MachineId=a.MachineId AND o.SiteId<>a.SiteId AND o.IsOpen=1) AS capacity,
-            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SiteId=a.SiteId AND e.MachineId=a.MachineId AND e.IsOpen=1) AS entries,
+                WHERE o.MachineId=a.MachineId AND o.SiteId<>a.SiteId AND o.IsOpen=1 AND o.IsParked=0) AS capacity,
+            (SELECT COUNT(*) FROM scheduler.Entry e WHERE e.SiteId=a.SiteId AND e.MachineId=a.MachineId AND e.IsOpen=1 AND e.IsParked=0) AS entries,
             CONVERT(bit,CASE WHEN a.IsEnabled=1 AND a.IsReady=1 AND a.MaintenanceTaskId IS NULL AND a.WorkerEpoch IS NOT NULL
                 AND a.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()) THEN 1 ELSE 0 END) AS available
             FROM scheduler.MachineAssignment a JOIN dbo.CustomerMachine m ON m.MachineId=a.MachineId

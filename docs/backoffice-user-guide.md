@@ -45,11 +45,15 @@ Click **Open Live** on a table with a bot to watch it in real time. Turn on **Ma
 
 Read what is written at your tables and answer through one of your bots seated there. Pick the table on the left, choose **Send as bot**, write the message and click **Send to table**. Messages from human players also show up in the Chat badge at the top of every page; desktop alerts can be turned on or off here.
 
+BluffPoker chat works at cash and tournament tables, with up to 300 characters per message. Messages are live: Poker Control saves those received while a bot is connected; BluffPoker does not supply earlier history. A send is confirmed when its broadcast arrives. Failed or unconfirmed messages are not sent again automatically. The Chat panel in a live table window offers the same controls.
+
 ![Chat: a table conversation and the reply box](../images/chat.png)
 
 ## Sessions
 
 A session is one bot logged in for a period of time; during it the bot joins and leaves tables. The list shows each bot's sessions, the machine running it, its table entries, and planned and actual end. **Stop** ends a session: the bot finishes the current hand and leaves its tables.
+
+A future MTT registration does not keep a playing session open. The bot can register and log out, then start a new session within 30 minutes of the tournament start. Those logins are paced rather than simultaneous. **Register MTT** also works for accounts without an active session: it logs in briefly, registers, and logs out without creating a playing session. Returning to a registration already held is allowed while new joins are paused.
 
 ### Starting a session yourself
 

@@ -10,6 +10,20 @@ from backoffice.store import Store,Context
 from backoffice.validation import Error
 from backoffice.updates import agent_request
 
+
+def test_new_pairing_code_expires_after_two_hours(monkeypatch):
+ from datetime import timedelta
+ from backoffice import pairing
+ stamp=datetime(2026,11,11,8,0)
+ monkeypatch.setattr(pairing,'now',lambda:stamp)
+ class FakeDB:
+  def one(self,sql,*args):return {'value':0} if 'sp_getapplock' in sql else {'n':0}
+  def execute(self,sql,*args):pass
+ key=rsa.generate_private_key(public_exponent=65537,key_size=3072)
+ result=public_request(FakeDB(),'request',{'hostname':'TEST','macs':['02-11-22-33-44-55'],
+  'public_key':key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode()},'test')
+ assert datetime.fromisoformat(result['expires'].removesuffix('Z'))==stamp+timedelta(hours=2)
+
 def test_envelope_requires_device_private_key():
  key=rsa.generate_private_key(public_exponent=65537,key_size=3072)
  envelope=seal(key.public_key(),{'secret':'test-runtime-secret'})

@@ -50,7 +50,9 @@ def tasks(db, role='operator'):
     store = SimpleNamespace(db=db, ctx=SimpleNamespace(role=role, customer_id=1, subject='me'),
                             site=lambda s: {'timezone': 'UTC'}, audit=lambda *a: None,
                             excluded_tournaments=lambda s: list(db.excluded))
-    return ManualTasks(store)
+    manual=ManualTasks(store)
+    manual.registration_accounts=lambda site: []
+    return manual
 
 
 def test_join_goes_to_the_sessions_pc_at_a_free_table_of_the_bots_stakes():
@@ -137,6 +139,35 @@ def test_register_mtt_picks_the_earliest_start():
     db = Database()
     db.tournaments = [tournament(1, 'MTT', 20, 50, minutes=90), tournament(2, 'MTT', 20, 5, minutes=30)]
     assert tasks(db).create(1, {'kind': 'register_mtt', 'account_id': '4', 'table_id': 'any'})['table'] == 'T2'
+
+
+def test_manual_mtt_registration_queues_a_started_late_registration():
+    import json
+    db = Database()
+    late = tournament(1, 'MTT', 20, 50, minutes=-30)
+    late['late_registration'] = True
+    db.tournaments = [late, tournament(2, 'MTT', 20, 5, minutes=30)]
+    assert tasks(db).options(1)['tournaments'][0]['late_registration'] is True
+    result = tasks(db).create(1, {'kind': 'register_mtt', 'account_id': '4', 'table_id': late['id']})
+    assert result['table'] == late['id']
+    command, = db.written('Command')
+    assert json.loads(command[6]) == {'account_id': 4, 'table_id': late['id'], 'manual': True,
+                                     'format': 'MTT', 'tournament_id': 1, 'registration_only': True}
+
+
+def test_manual_mtt_registration_does_not_create_or_require_a_playing_session():
+    import json
+    db=Database();db.tournaments=[tournament(1,'MTT',20,50,minutes=120)]
+    manual=tasks(db)
+    idle={**db.session,'session_id':None,'tables':[],'registration_only':True,
+          'machine_online':True,'machine_enabled':True}
+    manual.sessions=lambda site:[]
+    manual.registration_accounts=lambda site:[idle]
+    result=manual.create(1,{'kind':'register_mtt','account_id':4,'table_id':'T1'})
+    assert result['kind']=='register_mtt'
+    assert not db.written('AccountSession')
+    assert db.written('Entry')[0][-1] is None
+    assert json.loads(db.written('Command')[0][6])['registration_only'] is True
 
 
 def test_leave_ignores_tournament_entries():

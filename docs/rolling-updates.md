@@ -4,6 +4,10 @@ Operators order updates from the **Updates** page. Select a signed release, sele
 
 The scheduler serializes updates across the whole customer, including multiple sites. It downloads and verifies a release before pausing new joins. Other PCs continue their normal schedules throughout.
 
+Updater 1.0.20 shares successful status requests between its heartbeat and installation loops. Idle installations are checked every 15 seconds, with independent heartbeats during long downloads or startup. Diagnostic collectors use one file lock per PC and poll every 15 seconds; another collector takes over when the owner exits. The application rollout upgrades an older installed agent automatically.
+
+Worker database polling is adaptive: manual controls poll every three seconds while idle and every 250 ms while a control view is active. Live-view discovery polls every three seconds while idle and every second while active; expired views are cleaned every 30 seconds. Chat receives messages and claims an outgoing command in one transaction, refreshes its heartbeat every ten seconds and cleans stale commands every 15 seconds. Expired requests remain excluded on every read, and action ownership is checked for every command.
+
 ## Wait for sessions to finish (default, recommended)
 
 On the selected PC the scheduler finishes one account session at a time using normal randomized leave pacing and waits for hand completion (`MachineUpdateTask.Status='draining'`). Nothing is cut off; a bot leaves a table the same way it would at the natural end of its session. This is the only mode that existed before immediate updates were added, and remains the default and the recommended choice.
@@ -27,7 +31,7 @@ A failed update pauses the rollout. Startup failures attempt automatic rollback 
 
 New PCs use [PokerSuite Setup and pairing](pc-pairing-installation.pdf). Download the single EXE from Updates, run it on the PC, and approve its pairing code using the designated main administrator account. Approval registers or reuses the customer/site machine, delivers its encrypted runtime profile and queues its first release. JSON files are no longer copied manually. Setup 1.0.3 bundles the official Microsoft prerequisite installers. Its Install missing components button verifies signatures and checksums, installs only missing components with Windows administrator approval, and rechecks before pairing. Installer-requested restarts are left to the user; setup resumes detection after restart.
 
-Site runtime profiles are encrypted in `backoffice.SetupProfile` with an API-side `BACKOFFICE_PAIRING_KEY`. Configure them and explicit main-administrator membership with `tools/configure_pairing.py`. Approval is scoped to the selected customer/site. Public requests are rate limited and expire in 30 minutes; polling/acknowledgement requires a signed device-key proof. Credentials are encrypted for that RSA device key and removed from the pairing record after acknowledgement. The updater reads Windows user-bound DPAPI files, injects PDecision settings into its environment and avoids plaintext credential appsettings in managed releases.
+Site runtime profiles are encrypted in `backoffice.SetupProfile` with an API-side `BACKOFFICE_PAIRING_KEY`. Configure them and explicit main-administrator membership with `tools/configure_pairing.py`. Approval is scoped to the selected customer/site. Public requests are rate limited and expire in 2 hours; polling/acknowledgement requires a signed device-key proof. Credentials are encrypted for that RSA device key and removed from the pairing record after acknowledgement. The updater reads Windows user-bound DPAPI files, injects PDecision settings into its environment and avoids plaintext credential appsettings in managed releases.
 
 Existing JSON-based installations remain supported. Their ordinary rolling updates do not require re-pairing. Agent upgrades remain separate from application releases; setup contains agent 1.0.8.
 

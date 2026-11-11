@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
+from schedule_controller.hand_settlement import HEADER, normalize_history
 
 from .validation import Error, integer
 
@@ -29,7 +30,7 @@ def winnings(text: str, bot_names: list[str]):
     """Match PDecision HandHistoryWinnings' cash-hand contribution calculation."""
     own = {n.casefold(): n for n in bot_names}
     results = defaultdict(lambda: {"net": Decimal(0), "hands": 0})
-    sections = re.split(r"\*{5} Hand History for Game \d+ \*{5}", text)
+    sections = HEADER.split(normalize_history(text))
     if len(sections) == 1:
         raise ValueError("Unsupported hand-history format")
     for hand in sections[1:]:
@@ -163,7 +164,7 @@ class Histories:
 
     def _names(self, site_id):
         return [r["Username"] for r in self.db.rows("""SELECT b.Username FROM scheduler.AccountPolicy p
-            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.IsSynthetic=0""", site_id)]
+            JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId WHERE p.SiteId=%s AND p.IsSynthetic=0 AND b.IsActive=1""", site_id)]
 
     def _where(self, site_id, query):
         site = self.store.site(site_id)

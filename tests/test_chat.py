@@ -19,7 +19,10 @@ def chat():
         db=Database(conn)
         # Isolated SQL transaction holds these rows until rollback; the live
         # worker cannot see or send the test outbox records.
-        db.execute("UPDATE scheduler.MachineAssignment SET IsReady=1,LastHeartbeatUtc=SYSUTCDATETIME() WHERE SiteId=1 AND MachineId=1")
+        db.execute('SET LOCK_TIMEOUT 10000')
+        # Match the worker's lock order: machine ownership before the chat heartbeat.
+        machine=db.one('SELECT IsReady FROM scheduler.MachineAssignment WITH(UPDLOCK,HOLDLOCK) WHERE SiteId=1 AND MachineId=1')
+        if not machine or not machine['IsReady']:pytest.skip('Needs a ready worker')
         epoch=db.one('SELECT WorkerEpoch FROM scheduler.MachineAssignment WHERE SiteId=1 AND MachineId=1')['WorkerEpoch']
         db.execute("""UPDATE scheduler.ChatAgent SET WorkerEpoch=%s,UpdatedUtc=SYSUTCDATETIME() WHERE SiteId=1 AND MachineId=1;
             IF @@ROWCOUNT=0 INSERT scheduler.ChatAgent(SiteId,MachineId,WorkerEpoch) VALUES(1,1,%s)""",epoch,epoch)
@@ -50,6 +53,26 @@ def test_chat_summary_send_idempotency_and_access(chat):
     assert all(c['body'] for c in chat.messages(1,bot['table_id'],{})['commands'])
 
 
+def test_tournament_chat_uses_playing_table_not_registration_id(chat):
+    bot=next((b for t in chat.summary(1)['items'] for b in t['bots'] if b['chat_ready'] and b['machine_id']==1),None)
+    if not bot:pytest.skip('Needs a seated bot')
+    table='__chat_playing_'+str(uuid.uuid4())
+    chat.db.execute('UPDATE scheduler.Entry SET PlayTableId=%s WHERE EntryId=%s',table,bot['entry_id'])
+    conversation=next(t for t in chat.summary(1)['items'] if t['table_id']==table)
+    assert any(b['entry_id']==bot['entry_id'] for b in conversation['bots'])
+    request=str(uuid.uuid4())
+    chat.send(1,table,{'request_id':request,'entry_id':bot['entry_id'],'text':'Rollback only'})
+    assert any(c['id']==request for c in chat.messages(1,table,{})['commands'])
+    assert chat.db.one('SELECT TableId FROM scheduler.ChatCommand WHERE RequestId=%s',request)['TableId']==table
+    chat.db.execute('UPDATE scheduler.Entry SET PlayTableId=%s WHERE EntryId=%s',table+'-moved',bot['entry_id'])
+    assert any(c['id']==request for c in chat.messages(1,table,{})['commands'])
+    repo=worker_repository(chat)
+    repo.chat_exchange([])
+    assert chat.db.one('SELECT Status FROM scheduler.ChatCommand WHERE RequestId=%s',request)['Status']=='expired'
+    claimed=repo.claim_chat()
+    assert not claimed or str(claimed['RequestId'])!=request
+
+
 def test_human_notifications_are_personal_and_history_does_not_notify(chat):
     table='__chat_rollback_'+str(uuid.uuid4())[:8]
     for author,body,human,historical in [('Human','Hello',1,0),('monica','Hi',0,0),('Human','Old history',1,1)]:
@@ -66,7 +89,7 @@ def test_human_notifications_are_personal_and_history_does_not_notify(chat):
     with pytest.raises(Error): chat.read(1,table,{'last_id':messages[-1]['id']+100000})
 
 
-def test_worker_deduplication_classification_and_at_most_once_claim(chat):
+def worker_repository(chat):
     import sys
     from pathlib import Path
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'ScheduleController'))
@@ -87,6 +110,11 @@ def test_worker_deduplication_classification_and_at_most_once_claim(chat):
         @contextmanager
         def transaction(self): yield Adapter()
     repo=Repo();repo.epoch=epoch
+    return repo
+
+
+def test_worker_deduplication_classification_and_at_most_once_claim(chat):
+    repo=worker_repository(chat)
     table='__chat_worker_test'
     def message(author):
         return {'table_id':table,'event_key':uuid.uuid4().hex.ljust(64,'0'),'author':author,'body':'Test only',
@@ -96,7 +124,7 @@ def test_worker_deduplication_classification_and_at_most_once_claim(chat):
     rows=chat.db.rows('SELECT Author,IsHuman FROM scheduler.ChatMessage WHERE SiteId=1 AND TableId=%s',table)
     assert len(rows)==2
     assert {r['Author']:r['IsHuman'] for r in rows}=={'HumanRollbackTest':True,'monica':False}
-    seated=next((b for t in chat.summary(1)['items'] for b in t['bots'] if b['chat_ready']),None)
+    seated=next((b for t in chat.summary(1)['items'] for b in t['bots'] if b['chat_ready'] and b['machine_id']==1),None)
     if seated:
         body={'request_id':str(uuid.uuid4()),'entry_id':seated['entry_id'],'text':'Never sent in test'}
         chat.send(1,seated['table_id'],body)

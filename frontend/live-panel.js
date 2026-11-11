@@ -2,7 +2,7 @@
 // Each refreshes only its data; inputs and selections are built once, so typing is never interrupted.
 export function installLivePanel({$, esc, siteApi, toast, state, date}) {
  let tableId = null;
- const chatSupported = () => state.site?.platform !== 'BluffPokerPlatform';
+ const chatMaximum = () => state.site?.platform === 'BluffPokerPlatform' ? 300 : 2000;
 
  const panels = [];
  function drawer(side, title, body) {
@@ -86,10 +86,7 @@ export function installLivePanel({$, esc, siteApi, toast, state, date}) {
  };
  chat.refresh = async () => {
   if (chatBusy || !chat.open || !tableId) return;
-  if (!chatSupported()) {
-   $('#live-chat-body').innerHTML = '<p class="sub">Table chat is not available on BluffPoker.</p>';
-   return;
-  }
+  $('#live-chat-text').maxLength = chatMaximum();
   chatBusy = true;
   try {
    const [d, summary] = await Promise.all([siteApi(`chat/${encodeURIComponent(tableId)}`), siteApi('chat')]);

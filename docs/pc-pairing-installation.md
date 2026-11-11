@@ -16,7 +16,7 @@ Use Windows x64, including Windows 10, and the Windows account that will run the
 
 Download PokerSuite Setup.exe from Backoffice > Updates > Set up a new PC, or copy that EXE from your administrator. Run it on the new PC. You do not need Git, Python, the old installer ZIP or any JSON files. The EXE is not currently Authenticode signed; Windows may show a publisher warning.
 
-Setup displays the PC name and physical adapter MAC addresses. Click Get pairing code. Give the displayed code to the main administrator and keep setup open. The code expires after 30 minutes. Setup resumes an unexpired request when reopened under the same Windows account. Once enrollment exists, it hides pairing controls and opens the status screen automatically, even if the old pairing-request file is still present. Setup and agent versions are always visible. If local enrollment files are missing but the original device key is still available, setup verifies the prior approval and shows Restore approved installation instead of asking for another pairing code.
+Setup displays the PC name and physical adapter MAC addresses. Click Get pairing code. Give the displayed code to the main administrator and keep setup open. The code expires after 2 hours. Setup resumes an unexpired request when reopened under the same Windows account. Once enrollment exists, it hides pairing controls and opens the status screen automatically, even if the old pairing-request file is still present. Setup and agent versions are always visible. If local enrollment files are missing but the original device key is still available, setup verifies the prior approval and shows Restore approved installation instead of asking for another pairing code.
 
 # Approve the PC in Backoffice
 

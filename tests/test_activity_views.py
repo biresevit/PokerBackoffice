@@ -10,6 +10,7 @@ pytestmark=pytest.mark.skipif(os.getenv('BACKOFFICE_TEST_SQL')!='1',reason='Opt-
 def definition(db,name):
     source=db.one('SELECT OBJECT_DEFINITION(OBJECT_ID(%s)) AS source',name)['source']
     assert source,'Reporting migration must be applied'
+    source='\n'.join(line for line in source.splitlines() if not line.lstrip().startswith('--'))
     return source[source.index('SELECT '):]
 
 
@@ -39,8 +40,11 @@ def test_fresh_observer_cannot_keep_an_offline_owners_entry_running(age,owner_re
         body=definition(db,'backoffice.EntryPresence')
         for table,fake in [('scheduler.Entry','fake_entries'),('scheduler.MachineAssignment','fake_machines'),('scheduler.LobbyTable','fake_tables'),('scheduler.TableSeat','fake_seats'),('dbo.BotAccount','fake_bots')]:
             body=body.replace(table,fake)
-        row=db.one("""WITH fake_entries AS(SELECT 1 AS SiteId,1 AS MachineId,4 AS BotAccountId,'42' AS TableId,
-            'owner' AS WorkerEpoch,CAST(1 AS bit) AS IsOpen),
+        row=db.one("""WITH fake_entries AS(SELECT 'entry' AS EntryId,1 AS SiteId,1 AS MachineId,4 AS BotAccountId,'42' AS TableId,
+            'owner' AS WorkerEpoch,CAST(1 AS bit) AS IsOpen,'seated' AS Status,0 AS BuyInAmount,
+            CAST(NULL AS datetime2) AS CreatedUtc,CAST(NULL AS datetime2) AS SeatedUtc,
+            CAST(NULL AS datetime2) AS ClosedUtc,CAST(NULL AS datetime2) AS LastConfirmedUtc,
+            NULL AS SessionId,NULL AS PlayTableId,CAST(0 AS bit) AS IsParked),
             fake_machines AS(SELECT 1 AS SiteId,1 AS MachineId,'owner' AS WorkerEpoch,%s AS IsReady,CAST(%s AS datetime2) AS LastHeartbeatUtc
                 UNION ALL SELECT 1,2,'observer',1,CAST(%s AS datetime2)),
             fake_tables AS(SELECT 1 AS SiteId,'42' AS TableId,2 AS ObserverMachineId,'observer' AS ObserverEpoch,CAST(%s AS datetime2) AS FullSnapshotUtc),
@@ -48,3 +52,13 @@ def test_fresh_observer_cannot_keep_an_offline_owners_entry_running(age,owner_re
             fake_bots AS(SELECT 4 AS BotAccountId,'hero' AS Username)
             """+body,owner_ready,now-timedelta(seconds=age),now,now,now)
         assert row['IsLiveOwner']==expected and row['IsConfirmedSeat']==expected
+
+
+def test_entry_presence_exposes_parked_separately_from_computed_presence():
+    with session() as db:
+        columns=db.rows("SELECT name FROM sys.columns WHERE object_id=OBJECT_ID('backoffice.EntryPresence') ORDER BY column_id")
+        assert [c['name'] for c in columns][-3:]==['IsParked','IsLiveOwner','IsConfirmedSeat']
+        assert 'e.*' not in definition(db,'backoffice.EntryPresence')
+        # Query the deployed view, including its stored SQL Server metadata (not just its definition).
+        assert db.one("""SELECT COUNT(*) AS n FROM backoffice.EntryPresence p
+            JOIN scheduler.Entry e ON e.EntryId=p.EntryId WHERE p.IsParked<>e.IsParked""")['n']==0

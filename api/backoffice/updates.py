@@ -171,8 +171,11 @@ def agent_request(db,machine_id,headers,body,action):
     instance=guid(body.get('instance_id'),'agent instance')
     now=datetime.now(timezone.utc).replace(tzinfo=None)
     if row['InstanceId'] and str(row['InstanceId']).lower()!=instance and row['LastHeartbeatUtc'] and row['LastHeartbeatUtc']>now-timedelta(seconds=60):raise Error(409,'Another updater instance is active on this machine')
-    db.execute('UPDATE scheduler.MachineUpdateAgent SET InstanceId=%s,LastHeartbeatUtc=%s,AgentVersion=%s WHERE MachineId=%s',instance,now,str(body.get('agent_version',''))[:100],machine_id)
-    if action=='poll':db.execute('UPDATE scheduler.MachineUpdateAgent SET AppsHealthy=%s WHERE MachineId=%s',body.get('apps_running') is True,machine_id)
+    version=str(body.get('agent_version',''))[:100]
+    if action=='poll':
+        db.execute('UPDATE scheduler.MachineUpdateAgent SET InstanceId=%s,LastHeartbeatUtc=%s,AgentVersion=%s,AppsHealthy=%s WHERE MachineId=%s',instance,now,version,body.get('apps_running') is True,machine_id)
+    else:
+        db.execute('UPDATE scheduler.MachineUpdateAgent SET InstanceId=%s,LastHeartbeatUtc=%s,AgentVersion=%s WHERE MachineId=%s',instance,now,version,machine_id)
     if action=='poll' and body.get('needs_install') is True and not row['CurrentReleaseId']:
         db.execute("UPDATE scheduler.MachineUpdateAgent SET Stage='awaiting_install' WHERE MachineId=%s AND Stage IS NULL OR MachineId=%s AND Stage IN ('awaiting_install','failed')",machine_id,machine_id)
     task=db.one("""SELECT t.*,r.Status AS RolloutStatus,r.ReleaseId,r.Immediate,v.ManifestJson,v.Signature,v.ArtifactUrl,v.PDecisionVersion,v.PokerControllerVersion

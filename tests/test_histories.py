@@ -28,6 +28,21 @@ def test_case_insensitive_names_and_multiple_hands():
     assert result["Monica"]=={"net":Decimal(28),"hands":2}
 
 
+@pytest.mark.parametrize("hand_id", ["76da2b9c-881c-4506-a063-16642d54da08-27",
+                                     "76da2b9c-881c-4506-a063-16642d"])
+def test_bluffpoker_history_metrics_and_mixed_id_reports(hand_id):
+    bluff = HAND.replace("162968912", hand_id).replace("\n", "\r\n")
+    assert hand_metrics(bluff, "monica", ["monica"]) == {"human_count": 1, "hero_winnings": Decimal(14)}
+    assert winnings(HAND + bluff, ["monica"])["monica"] == {"net": Decimal(28), "hands": 2}
+
+
+def test_localized_currency_in_bluffpoker_report():
+    hand = HAND.replace("162968912", "76da2b9c-881c-4506-a063-16642d")
+    hand = hand.replace("$1/$2", "$1,00/$2,00").replace("$28 USD", "$28,00 USD")
+    hand = hand.replace("\n", "\r\r\n")
+    assert winnings(hand, ["monica"])["monica"] == {"net": Decimal(14), "hands": 1}
+
+
 def test_incomplete_hand_is_not_a_zero_winnings_result():
     with pytest.raises(ValueError):
         winnings(HAND.replace("monica wins $28 USD", ""),["monica"])

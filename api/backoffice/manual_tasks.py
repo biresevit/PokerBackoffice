@@ -70,10 +70,13 @@ class ManualTasks:
         Tournaments whose name contains one of the site's excluded names are left out."""
         ranges=self.db.rows('SELECT Tier,TournamentMinBuyIn,TournamentMaxBuyIn FROM scheduler.StakeBand WHERE SiteId=%s',site_id)
         rows=self.db.rows("""SELECT TableId AS id,TableName AS name,TableType AS format,MinBuyIn AS buy_in,
-            OccupiedSeats AS registered,MaxSeats AS max_players,StartUtc AS start FROM scheduler.LobbyTable
-            WHERE SiteId=%s AND TableType IN ('SNG','MTT') AND TournamentState='registering' AND GameType='NLH'
+            OccupiedSeats AS registered,MaxSeats AS max_players,StartUtc AS start,
+            CONVERT(bit,CASE WHEN TableType='MTT' AND TournamentState='running' THEN 1 ELSE 0 END) AS late_registration
+            FROM scheduler.LobbyTable
+            WHERE SiteId=%s AND TableType IN ('SNG','MTT') AND IsOpen=1 AND GameType='NLH'
               AND ObservedUtc>=DATEADD(minute,-5,SYSUTCDATETIME())
-              AND (TableType='SNG' AND OccupiedSeats<MaxSeats OR TableType='MTT' AND StartUtc>DATEADD(minute,2,SYSUTCDATETIME()))
+              AND (TableType='SNG' AND TournamentState='registering' AND OccupiedSeats<MaxSeats
+                   OR TableType='MTT' AND TournamentState IN ('registering','running'))
             ORDER BY TableType,StartUtc,OccupiedSeats DESC""",site_id)
         excluded=self.store.excluded_tournaments(site_id)
         rows=[t for t in rows if not is_excluded_tournament(t['name'],excluded)]
@@ -84,6 +87,7 @@ class ManualTasks:
 
     def options(self,site_id):
         sessions=self.sessions(site_id);tables=self.tables(site_id);tournaments=self.tournaments(site_id)
+        sessions.extend(self.registration_accounts(site_id))
         for s in sessions:
             seated={e['table_id'] for e in s['tables']}
             s['join_tables']=[t['id'] for t in tables if t['tier']==s['tier'] and t['id'] not in seated
@@ -91,6 +95,36 @@ class ManualTasks:
             s['tournaments']=[t['id'] for t in tournaments if s['tier'] in t['tiers'] and t['id'] not in seated]
             s.pop('epoch',None)
         return {'sessions':sessions,'tables':tables,'tournaments':tournaments}
+
+    def registration_accounts(self,site_id):
+        """Idle accounts may register an MTT transiently, without inventing a playing session."""
+        self.store.site(site_id)
+        from .sessions import Sessions
+        machines=[m for m in Sessions(self.store).machines(site_id) if m['available']]
+        if not machines:return []
+        rows=self.db.rows("""SELECT b.BotAccountId AS id,b.Username AS username,b.Strategy AS strategy,p.StakeTier AS tier,
+                p.MaxTables AS max_tables,p.MaxSngEntries AS max_sng_entries,p.MaxMttEntries AS max_mtt_entries,
+                l.MachineId AS owner,l.WorkerEpoch AS lease_epoch,l.RequiresReconciliation
+            FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
+            LEFT JOIN scheduler.AccountLease l ON l.BotAccountId=p.BotAccountId
+            WHERE p.SiteId=%s AND p.IsEnabled=1 AND p.IsSynthetic=0 AND p.DeletedUtc IS NULL AND b.IsActive=1
+              AND (p.CredentialRef IS NOT NULL OR b.LoginEmail IS NOT NULL AND b.LoginPassword IS NOT NULL)
+              AND NOT EXISTS(SELECT 1 FROM scheduler.AccountSession s WHERE s.BotAccountId=b.BotAccountId AND s.IsOpen=1)
+            ORDER BY b.Username""",site_id)
+        entries=self.db.rows("""SELECT e.EntryId AS id,e.BotAccountId AS account_id,e.TableId AS table_id,e.Status AS status,
+                l.TableType AS table_type,l.TableName AS table_name,CONVERT(bit,0) AS leaving
+            FROM scheduler.Entry e JOIN scheduler.LobbyTable l ON l.SiteId=e.SiteId AND l.TableId=e.TableId
+            WHERE e.SiteId=%s AND e.IsOpen=1""",site_id)
+        result=[]
+        for r in rows:
+            usable=[m for m in machines if not r['RequiresReconciliation'] and (r['owner'] is None or
+                m['id']==r['owner'] and str(m['epoch']).lower()==str(r['lease_epoch']).lower())]
+            if not usable:continue
+            m=min(usable,key=lambda m:(m['entries']/max(1,m['capacity']),m['id']))
+            result.append({**r,'session_id':None,'registration_only':True,'machine_id':m['id'],'machine':m['name'],
+                'epoch':m['epoch'],'machine_online':True,'machine_ready':True,'machine_enabled':True,
+                'profile':PROFILES.get(r['strategy'],'Custom'),'tables':[e for e in entries if e['account_id']==r['id']]})
+        return result
 
     def join_candidates(self,site_id,table_id):
         """Every account that can join this ring table now: enabled with a login, the table's stake tier and game,
@@ -163,7 +197,9 @@ class ManualTasks:
             # Live table: a bot without a session joins on any available PC.
             self.start_session(site_id,account_id)
             session=next((s for s in self.sessions(site_id) if s['id']==account_id),None)
-        if not session:raise Error(409,'That bot has no open session. Create a session first.')
+        if not session and kind=='register_mtt':
+            session=next((s for s in self.registration_accounts(site_id) if s['id']==account_id),None)
+        if not session:raise Error(409,'That bot has no open session or no online PC is available for MTT registration.')
         machine=session['machine'] or session['machine_id']
         if not session['machine_online']:raise Error(409,f"{machine} is not online")
         if kind in ('join','register_sng','register_mtt') and not session['machine_enabled']:
@@ -196,7 +232,7 @@ class ManualTasks:
             table=entry['table_id'];table_name=entry['table_name']
         elif kind in ('register_sng','register_mtt'):
             fmt='SNG' if kind=='register_sng' else 'MTT'
-            if len(session['tables'])>=session['max_tables']:
+            if fmt!='MTT' and len(session['tables'])>=session['max_tables']:
                 raise Error(409,f"{session['username']} already uses its maximum of {session['max_tables']} tables")
             limit=session['max_sng_entries'] if fmt=='SNG' else session['max_mtt_entries']
             held=sum(1 for e in session['tables'] if e.get('table_type')==fmt)
@@ -226,12 +262,12 @@ class ManualTasks:
             entry_id=str(uuid.uuid4());table=table_row['id'];table_name=table_row['name']
             self.db.execute("""INSERT scheduler.Entry(EntryId,SiteId,BotAccountId,MachineId,WorkerEpoch,TableId,Status,IsOpen,CreatedUtc,SessionId)
                 VALUES(%s,%s,%s,%s,%s,%s,'reserved',1,SYSUTCDATETIME(),%s)""",
-                entry_id,site_id,account_id,session['machine_id'],session['epoch'],table,session['session_id'])
+                entry_id,site_id,account_id,session['machine_id'],session['epoch'],table,None if fmt=='MTT' else session['session_id'])
             self.db.execute("""INSERT scheduler.Command(CommandId,SiteId,EntryId,MachineId,WorkerEpoch,Kind,Status,IsOpen,
                 ConfigVersion,PayloadJson,NotBeforeUtc,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,'join','pending',1,%s,%s,%s,%s)""",
                 command_id,site_id,entry_id,session['machine_id'],session['epoch'],version,
                 json.dumps({'account_id':account_id,'table_id':table,'manual':True,'format':fmt,
-                            'tournament_id':tournament_id(table)}),now,now+timedelta(minutes=10))
+                            'tournament_id':tournament_id(table),'registration_only':fmt=='MTT'}),now,now+timedelta(minutes=10))
         else:
             if len(session['tables'])>=session['max_tables']:
                 raise Error(409,f"{session['username']} already plays its maximum of {session['max_tables']} tables")

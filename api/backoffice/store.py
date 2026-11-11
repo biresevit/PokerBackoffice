@@ -159,7 +159,7 @@ class Store:
         if not lock and site_id in self._site_cache:
             return self._site_cache[site_id]
         hint = "WITH(UPDLOCK,HOLDLOCK)" if lock else ""
-        result = self.db.one(f"""SELECT SiteId AS id,Casino AS name,CustomerId AS customer_id,TimeZone AS timezone,
+        result = self.db.one(f"""SELECT SiteId AS id,Casino AS name,Platform AS platform,CustomerId AS customer_id,TimeZone AS timezone,
             CurrencyCode AS currency,ConfigVersion AS version,SchedulingEnabled AS enabled,JoinsPaused AS joins_paused
             FROM scheduler.Site {hint} WHERE SiteId=%s AND CustomerId=%s""", site_id, self.ctx.customer_id)
         if result is None:

@@ -8,6 +8,7 @@ from .validation import Error,integer
 from .updates import Updates,guid,operator
 
 def now():return datetime.now(timezone.utc).replace(tzinfo=None)
+PAIRING_LIFETIME = timedelta(hours=2)
 def b64(value):return base64.b64encode(value).decode()
 def admin(store):
  if store.ctx.role!='operator' or not store.db.one('SELECT Subject FROM backoffice.SetupAdministrator WHERE Provider=%s AND Subject=%s',store.ctx.provider,store.ctx.subject):raise Error(403,'Main administrator approval is required')
@@ -45,7 +46,7 @@ def public_request(db,action,body,source):
   except (KeyError,ValueError,TypeError,AttributeError):raise Error(400,'Invalid setup public key')
   db.execute("DELETE FROM backoffice.DevicePairing WHERE Status='pending' AND ExpiresUtc<%s",stamp-timedelta(days=1))
   db.execute('UPDATE backoffice.DevicePairing SET EnvelopeJson=NULL WHERE ExpiresUtc<%s',stamp)
-  rid=str(uuid.uuid4());code=''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(10));expiry=stamp+timedelta(minutes=30)
+  rid=str(uuid.uuid4());code=''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(10));expiry=stamp+PAIRING_LIFETIME
   db.execute('INSERT backoffice.DevicePairing(RequestId,Code,HostName,MacsJson,PublicKey,SourceHash,ExpiresUtc) VALUES(%s,%s,%s,%s,%s,%s,%s)',rid,code,host,json.dumps(addresses),pem,source,expiry)
   return {'id':rid,'code':code,'expires':expiry.isoformat()+'Z'}
  rid=guid(body.get('id'),'setup request');row=db.one('SELECT * FROM backoffice.DevicePairing WITH(UPDLOCK,HOLDLOCK) WHERE RequestId=%s',rid)
@@ -74,7 +75,7 @@ def public_request(db,action,body,source):
   store=Store(db,Context(row['CustomerId'],'device',rid,'operator'))
   runtime=profile(db,row['SiteId']);cfg=Updates(store).enroll(row['SiteId'],{'machine_id':row['MachineId']})
   envelope=seal(key,{'config':cfg,'pdecision':runtime['pdecision'],'worker':runtime['worker']})
-  db.execute('UPDATE backoffice.DevicePairing SET EnvelopeJson=%s,ExpiresUtc=%s WHERE RequestId=%s',json.dumps(envelope),now()+timedelta(minutes=30),rid)
+  db.execute('UPDATE backoffice.DevicePairing SET EnvelopeJson=%s,ExpiresUtc=%s WHERE RequestId=%s',json.dumps(envelope),now()+PAIRING_LIFETIME,rid)
   retry_queued=False
   latest=db.one('SELECT TOP(1) t.Status,t.RolloutId,r.ReleaseId,r.Status AS RolloutStatus,g.CurrentReleaseId,v.Enabled FROM scheduler.MachineUpdateTask t JOIN scheduler.UpdateRollout r ON r.RolloutId=t.RolloutId JOIN scheduler.MachineUpdateAgent g ON g.MachineId=t.MachineId JOIN scheduler.UpdateRelease v ON v.ReleaseId=r.ReleaseId WHERE t.MachineId=%s ORDER BY r.CreatedUtc DESC',row['MachineId'])
   if latest and latest['Status']=='failed' and latest['RolloutStatus']=='paused' and not latest['CurrentReleaseId'] and latest['Enabled'] and not db.one("SELECT TaskId FROM scheduler.MachineUpdateTask WHERE RolloutId=%s AND Status NOT IN ('completed','cancelled','failed','rolled_back')",latest['RolloutId']):
