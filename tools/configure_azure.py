@@ -59,7 +59,7 @@ def main():
             "scheduler.ChatCommand":"SELECT,INSERT","backoffice.ChatReadState":"SELECT,INSERT,UPDATE",
             "scheduler.AccountDay":"SELECT","scheduler.Entry":"SELECT,INSERT","scheduler.AccountLease":"SELECT,INSERT",
             "scheduler.AccountSession":"SELECT","scheduler.Command":"SELECT,INSERT","scheduler.Outbox":"INSERT","scheduler.MachineTelemetry":"SELECT",
-            "scheduler.ScheduleWindow":"SELECT","scheduler.StakeBand":"SELECT,UPDATE",
+            "scheduler.ScheduleWindow":"SELECT","scheduler.StakeBand":"SELECT,UPDATE","scheduler.MttPlan":"SELECT,INSERT,UPDATE,DELETE",
             "scheduler.LobbyTable":"SELECT","scheduler.TableSeat":"SELECT","scheduler.MachineAssignment":"SELECT,UPDATE",
             "scheduler.LiveViewRequest":"SELECT,INSERT,UPDATE","scheduler.LiveTableSnapshot":"SELECT"}
         for table,rights in permissions.items():

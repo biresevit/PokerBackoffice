@@ -211,3 +211,8 @@ tr.selected td{background:#f3f8ee}
 @media(max-width:650px){.dist-section table{table-layout:auto}.dist-section th{width:auto!important}}
 .account-pagination{flex-wrap:wrap}.page-size{display:flex;align-items:center;gap:7px;margin-right:auto}.page-size select{font-size:11px;padding:4px 6px}
 @media(max-width:650px){.page-size{margin-right:0;width:100%;justify-content:center}}
+/* Schedule page, MTT tab */
+.mtt-starts{margin-top:4px;font-size:.85em}
+.mtt-starts summary{cursor:pointer;color:var(--muted,#667085)}
+.mtt-starts ul{margin:4px 0 0;padding-left:18px}
+.checkbox-field{display:flex;flex-direction:row;align-items:center;gap:8px;align-self:end}

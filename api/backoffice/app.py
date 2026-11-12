@@ -134,7 +134,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings|mtts)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
@@ -229,6 +229,16 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 metric_match = re.fullmatch(r"(\d+)/metrics", tail)
                 if metric_match:
                     return response(store.machine_metrics(sid, int(metric_match[1]), request.query))
+            if section == "mtts" and tail is None:
+                from .mtts import Mtts
+                mtts = Mtts(store)
+                if method == "GET":
+                    return response(mtts.list(sid))
+                if method == "PUT":
+                    return response(mtts.save(sid, body))
+                if method == "DELETE":
+                    return response(mtts.delete(sid, body))
+                raise Error(405, "Method not allowed")
             if method == "GET" and tail is None and section == "schedule":
                 return response(store.schedule(sid, request.query.get("format") or "RING"))
             if method == "GET" and tail is None and section in ("overview", "accounts", "stakes", "tables", "machines"):

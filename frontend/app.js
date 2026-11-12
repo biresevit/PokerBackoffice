@@ -4,6 +4,7 @@ import {ManualControls} from './manual-controls.js?v=20261103.tmanual1';
 import {installLivePanel} from './live-panel.js?v=20261111.bluffchat1';
 import {installDistributions} from './distributions-ui.js?v=20261112.accounts1';
 import {installAccounts,capacity as accountCapacity} from './accounts-ui.js?v=20261112.accounts2';
+import {installMtts} from './mtt-ui.js?v=20261112.mtt1';
 import {installUpdates} from './updates-ui.js?v=20261108.machines';
 import {installChat} from './chat-ui.js?v=20261111.bluffchat1';
 import {installCasinoSettings} from './casino-settings.js?v=20261111.solver1';
@@ -205,11 +206,13 @@ function importDialog(version){
  $('#preview-csv').onclick=async()=>{try{const mode=$('[name=mode]',$('#dialog')).value;preview={...await siteApi('accounts/import-preview','POST',{csv,mode,version}),mode};$('#csv-preview').innerHTML=`<p>${esc(JSON.stringify(preview.counts))}</p>`+table(['Username','Email','Change'],preview.changes.map(c=>`<tr><td>${esc(c.username)}</td><td>${esc(c.email||'')}</td><td>${esc(c.kind==='skipped'?'skipped: '+c.reason:(c.kind||c.action))}</td></tr>`));}catch(e){$('.dialog-error').textContent=e.message;}};
 }
 // Each game format has its own weekly schedule: ring tables, or how many bots play SNGs / MTTs at once.
-const scheduleFormats=[['RING','Ring','Entries','Seated ring-table entries the scheduler keeps playing.'],['SNG','SNG','Bots','Bots registered in or playing sit & gos at once.'],['MTT','MTT','Bots','Bots registered in or playing multi-table tournaments at once.']];
+const scheduleFormats=[['RING','Ring','Entries','Seated ring-table entries the scheduler keeps playing.'],['SNG','SNG','Bots','Bots registered in or playing sit & gos at once.'],['MTT','MTT','Bots','Bots per MTT, planned for each tournament.']];
 pages.schedule=async gen=>{
  const fmt=state.scheduleFormat||'RING',[,fmtLabel,unit,meaning]=scheduleFormats.find(f=>f[0]===fmt);
- const d=await siteApi('schedule?format='+fmt);let windows=structuredClone(d.windows),version=d.version;
  const tabs=`<div class="section-tabs" role="tablist" aria-label="Game format">${scheduleFormats.map(([k,label])=>`<button role="tab" data-schedule-format="${k}" class="${k===fmt?'active':''}" aria-selected="${k===fmt}">${label}</button>`).join('')}</div>`;
+ // MTTs are planned per tournament (mtt-ui.js), not by weekly windows.
+ if(fmt==='MTT')return mttUi.page(gen,tabs);
+ const d=await siteApi('schedule?format='+fmt);let windows=structuredClone(d.windows),version=d.version;
  if(!render(gen,'Recurring targets per game format in your site’s local timezone. Every add, edit and removal saves immediately.',tabs+`<div id="capacity-note"></div><div class="joins-switch${d.joins_paused?' paused':''}"><label><input type="checkbox" role="switch" id="joins-switch" ${d.joins_paused?'':'checked'}><span class="track"><span class="knob"></span></span><strong>${d.joins_paused?'Joins paused':'Joins running'}</strong></label><span>${d.joins_paused?'Bots don’t join ring tables or register for SNGs and MTTs until you switch this back on. Seated bots keep playing and sessions still end on schedule.':'Bots join ring tables and register for SNGs and MTTs by the targets below. Switch off to stop new joins and registrations on all formats.'}</span></div><div class="notice">${d.enabled?'Scheduling is enabled.':'Scheduling is paused.'} Timezone: ${esc(d.timezone)} · ${esc(fmtLabel)} target: ${esc(meaning)} Changes auto-save.</div>`+card(`${fmtLabel} weekly targets`,'<div class="card-body" id="week"></div>')+card(`${fmtLabel} schedule windows`,'<div id="windows"></div>'),`<span class="edit-action">${button('+ Add window','add-window',true)}</span>`))return;
  document.querySelectorAll('[data-schedule-format]').forEach(b=>b.onclick=()=>{state.scheduleFormat=b.dataset.scheduleFormat;navigate();});
  const capacityNote=async list=>{
@@ -417,6 +420,7 @@ async function showHandReplay(id){
  }catch(e){d.close();toast(e.message);}
 }
 const drawDistributions=installDistributions({$,esc,siteApi,modal,toast,table,card,navigate});
+const mttUi=installMtts({$,esc,state,render,siteApi,modal,toast,table,card,pill,navigate,accountCapacity});
 const accountsUi=installAccounts({$,esc,state,render,siteApi,modal,toast,table,card,pill,field,select,button,navigate,tiers,drawDistributions,importDialog});
 const updatesUi=installUpdates({$,esc,state,pages,render,siteApi,date,pill,toast,download});
 const startChatNotifications=installChat({$,esc,state,pages,render,pill,siteApi,date,toast,empty});

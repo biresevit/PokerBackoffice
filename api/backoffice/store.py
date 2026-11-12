@@ -20,6 +20,8 @@ def scheduled_target(schedule, instant=None):
     """Target entries for an instant, using the site's local weekday/time."""
     if not schedule["enabled"]:
         return 0
+    if schedule.get("target"):  # MTT: the per-tournament plans (mtts.planned_target)
+        return schedule["target"](instant or datetime.now(timezone.utc))
     local = (instant or datetime.now(timezone.utc)).astimezone(ZoneInfo(schedule["timezone"]))
     minute = local.hour * 60 + local.minute
     return next((row["target"] for row in schedule["windows"]
@@ -818,6 +820,9 @@ class Store:
             today,month,self.ctx.customer_id,prefix,prefix)
         schedules = self.schedules(site_id)
         schedule = schedules["RING"]
+        from .mtts import planned_target
+        now = datetime.now(timezone.utc)
+        schedules["MTT"] = {**schedules["MTT"], "windows": [], "target": planned_target(self.db, site_id, now, now)}
         online=sum(1 for machine in machines if machine["online"])
         warnings=[{"machine":m["name"] or f"Machine {m['id']}","message":warning}
                   for m in machines for warning in m["warnings"]]
@@ -826,7 +831,9 @@ class Store:
                                 key=lambda m:(m["heartbeat"] is not None,m["heartbeat"] or datetime.min))
         return {"site": site, "accounts": accounts["total"], "synthetic_accounts": accounts["synthetic"],
                 "entries": entries, "targets": {fmt: scheduled_target(s) for fmt, s in schedules.items()},
-                "windows": {fmt: len(s["windows"]) for fmt, s in schedules.items()}, "machines": machines,
+                "windows": {**{fmt: len(s["windows"]) for fmt, s in schedules.items()},
+                            "MTT": self.db.one("SELECT COUNT(*) AS n FROM scheduler.MttPlan WHERE SiteId=%s AND TotalBots>0", site_id)["n"]},
+                "machines": machines,
                 "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings,
                                    "offline_machines":offline_machines},
                 "hand_histories": history, "schedule": schedule}
@@ -857,6 +864,9 @@ class Store:
         if stop <= start:
             raise Error(400, "The selected range has not started yet")
         step_minutes = 1 if days <= 2 else 30 if days <= 14 else 120
+        if fmt == "MTT":
+            from .mtts import planned_target
+            schedule = {**schedule, "windows": [], "target": planned_target(self.db, site_id, start, stop)}
         if fmt == "RING":
             rows = self.db.rows(f"""SELECT p.SeatedUtc AS seated,CASE WHEN p.LastConfirmedUtc IS NOT NULL AND (p.ClosedUtc IS NULL OR p.ClosedUtc>DATEADD(second,60,p.LastConfirmedUtc)) THEN DATEADD(second,60,p.LastConfirmedUtc) ELSE p.ClosedUtc END AS closed
                 FROM scheduler.Entry p {ENTRY_LOBBY_JOIN} WHERE p.SiteId=%s AND p.SeatedUtc IS NOT NULL AND {ENTRY_FORMAT_SQL}='RING'

@@ -2,5 +2,6 @@
   "__init__.py": "e9ba9e636e149f2f492868cdc262cc3104f0256a94e3b58dbc01a81dfbd4d76e",
   "rules.py": "93cf248860aae9bb016f2eb9d566a672e82a3ef70c4bac31ae7d16b73df5ad09",
   "update_rollouts.py": "343368243227476f971732ceb5bc7a0ef702fed80b60b3a68fe475daee16b991",
-  "hand_settlement.py": "cccd126ad278971c1e4cce1f7e13d3288d7cdeedb76ae59a2acc445a81a41282"
+  "hand_settlement.py": "cccd126ad278971c1e4cce1f7e13d3288d7cdeedb76ae59a2acc445a81a41282",
+  "mtt_plans.py": "5ef6d1819d785deb21dba23cce0ccb4423a80db5c25e5493b57635aeea8f26c4"
 }
