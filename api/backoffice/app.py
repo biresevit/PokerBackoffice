@@ -234,6 +234,9 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             if method == "GET" and tail is None and section in ("overview", "accounts", "stakes", "tables", "machines"):
                 return response(getattr(store, section)(sid))
             if section == "accounts":
+                if method == "POST" and tail == "bulk":
+                    from .distributions import Distributions
+                    return response(Distributions(store).bulk_set(sid, body))
                 if method == "POST" and tail in ("import-preview", "import"):
                     return response(store.import_accounts(sid, body, apply=tail == "import"))
                 if tail and (tail == "distributions" or tail.startswith("distributions/")):
@@ -258,6 +261,8 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 return response(getattr(store, "save_" + section)(sid, body))
             if method == "PUT" and section == "machines" and tail and tail.isdecimal():
                 return response(store.save_machine(sid, int(tail), body))
+            if method == "DELETE" and section == "machines" and tail and tail.isdecimal():
+                return response(store.delete_machine(sid, int(tail), body))
             raise Error(405, "Method not allowed")
     except Error as exc:
         return response({"error": exc.message}, exc.status)

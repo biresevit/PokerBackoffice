@@ -174,3 +174,40 @@ dialog.replay-dialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-h
 .live-panel-messages p{margin:0 0 6px}.live-panel-messages p.human strong{color:#8e3f2f}.live-panel-messages .sub{display:block;font-size:10px}
 
 .live-chat-form{display:flex;flex-direction:column;gap:8px}.live-chat-form label{display:grid;gap:4px}.live-chat-form textarea{width:100%;resize:vertical;font:inherit;padding:8px;border:1px solid #dce2d6;border-radius:8px}.live-chat-form button{align-self:flex-end}.live-chat-form[hidden]{display:none}
+
+/* Accounts page (2026-11-12): capacity strip, filters, sortable headers, selection, grouped settings */
+.capacity-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:6px}
+.capacity-chip{background:#fff;border:1px solid var(--line);border-radius:9px;padding:12px 15px;min-width:0}
+.capacity-chip span{display:block;font-size:11px;color:var(--muted)}
+.capacity-chip strong{display:block;font-size:22px;font-weight:600;letter-spacing:-.6px;font-variant-numeric:tabular-nums;line-height:1.35}
+.capacity-chip small{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.capacity-note{font-size:11px;color:var(--muted);margin:0 0 18px}
+.account-toolbar{justify-content:flex-start}
+.account-toolbar .search{flex:1 1 220px;max-width:320px;padding:7px 10px}
+.account-toolbar select{font-size:12px;padding:7px 8px}
+.account-count{margin-left:auto;font-size:12px;color:var(--muted)}
+.bulk-actions{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--green)}
+.sort-head{border:0;background:transparent;padding:0;font:inherit;color:inherit;letter-spacing:inherit;cursor:pointer}
+.sort-head:hover,.sort-head.active{color:var(--ink)}
+tr.selected td{background:#f3f8ee}
+.session-state.green{color:#497244}.session-state.orange{color:#9a7b35}
+.settings-section{border-top:1px solid var(--line);padding:4px 0 6px}
+.settings-section:first-child{border-top:0}
+.settings-section>summary{cursor:pointer;font-weight:650;font-size:13px;padding:12px 0;list-style-position:inside}
+.settings-section>.sub{margin:-4px 0 12px}
+.settings-section>.form-grid{margin-bottom:14px}
+.settings-section .checkbox-line{margin:0}
+.danger-zone{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:22px;padding:14px 16px;border:1px solid #eed7d0;border-radius:8px;background:#fffaf8}
+.danger-zone strong{font-size:12px}.danger-zone .sub{margin:2px 0 0}
+.dist-group{margin:18px 22px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.dist-unset{margin:8px 22px 4px;font-size:12px;color:var(--muted)}
+.link-button{border:0;background:transparent;padding:0;color:var(--green);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+@media(max-width:1100px){.capacity-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:650px){.capacity-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.account-toolbar .search{max-width:none}.account-count{margin-left:0}.danger-zone{flex-direction:column;align-items:stretch}}
+.bulk-actions[hidden]{display:none}
+.dist-section table{table-layout:fixed}.dist-section th:nth-child(1){width:24%}.dist-section th:nth-child(2){width:36%}.dist-section th:nth-child(3){width:25%}.dist-section th:nth-child(4){width:15%}
+.dist-section td{white-space:normal}
+.button.primary.danger-primary{background:#a64440;border-color:#a64440}.button.primary.danger-primary:hover{background:#8f3935}
+@media(max-width:650px){.dist-section table{table-layout:auto}.dist-section th{width:auto!important}}
+.account-pagination{flex-wrap:wrap}.page-size{display:flex;align-items:center;gap:7px;margin-right:auto}.page-size select{font-size:11px;padding:4px 6px}
+@media(max-width:650px){.page-size{margin-right:0;width:100%;justify-content:center}}

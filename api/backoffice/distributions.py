@@ -230,6 +230,45 @@ class Distributions:
         self.store.audit("distribution.apply", site_id, {"fields": [f["field"] for f in plan["fields"]], "accounts": len(accounts), "changed": changed})
         return {"version": site["version"] + 1, "accounts": len(accounts), "changed": changed}
 
+    def bulk_set(self, site_id, body):
+        """Set one account setting to one value on the chosen accounts (Accounts page, Edit selected).
+
+        field 'enabled' switches scheduling on or off; every other field is one of FIELDS."""
+        site = self.store.site(site_id, lock=True, version=body.get("version"))
+        if self.store.ctx.role != "operator":
+            raise Error(403, "Your account has view-only access")
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 5000:
+            raise Error(400, "Choose at least one account")
+        ids = sorted({integer(v, 1, field="account") for v in ids})
+        field = body.get("field")
+        rows = self.db.rows(f"""SELECT p.BotAccountId AS id,p.IsSynthetic AS synthetic FROM scheduler.AccountPolicy p
+            WHERE p.SiteId=%s AND p.DeletedUtc IS NULL AND p.BotAccountId IN ({",".join(["%s"] * len(ids))})""", site_id, *ids)
+        if len(rows) != len(ids):
+            raise Error(404, "Some of the chosen accounts no longer exist. Refresh and try again.")
+        if field == "enabled":
+            value = body.get("value")
+            if not isinstance(value, bool):
+                raise Error(400, "Scheduling must be on or off")
+            if value and any(r["synthetic"] for r in rows):
+                raise Error(400, "Simulation-only accounts cannot be enabled; leave them out of the selection")
+            table, column, label = "scheduler.AccountPolicy", "IsEnabled", "Scheduling"
+        elif field in FIELDS:
+            value, spec = parse_value(field, body.get("value")), FIELDS[field]
+            table = "dbo.BotAccount" if spec["table"] == "account" else "scheduler.AccountPolicy"
+            column, label = spec["column"], spec["label"]
+        else:
+            raise Error(400, "Choose a setting to change")
+        site_filter = " AND SiteId=%s" if table == "scheduler.AccountPolicy" else ""
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            self.db.execute(f"UPDATE {table} SET {column}=%s,UpdatedUtc=SYSUTCDATETIME() "
+                            f"WHERE BotAccountId IN ({','.join(['%s'] * len(chunk))}){site_filter}",
+                            value, *chunk, *((site_id,) if site_filter else ()))
+        self.store.bump(site_id)
+        self.store.audit("account.bulk_update", site_id, {"field": field, "value": value, "accounts": ids})
+        return {"version": site["version"] + 1, "accounts": len(ids), "label": label}
+
     def new_account_picker(self, site_id):
         """A function returning {field: value} for each new account, keeping every distribution on target.
 

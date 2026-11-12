@@ -1,5 +1,6 @@
 // Value distributions for account settings (Accounts page): the share of accounts per value.
 // New accounts follow them automatically; existing accounts change only when you apply them.
+import {SETTING_GROUPS as GROUPS} from './accounts-ui.js?v=20261112.accounts2';
 export function installDistributions({$,esc,siteApi,modal,toast,table,card,navigate}){
  const pct=p=>`${Number(p).toLocaleString(undefined,{maximumFractionDigits:2})}%`;
  const label=(f,v)=>{const c=(f.choices||[]).find(([k])=>String(k)===String(v));return c?c[1]:String(v);};
@@ -52,11 +53,19 @@ export function installDistributions({$,esc,siteApi,modal,toast,table,card,navig
 
  return async function draw(root){
   const d=await siteApi('accounts/distributions');
+  const byField=Object.fromEntries(d.fields.map(f=>[f.field,f])),listed=new Set(GROUPS.flatMap(g=>g[1]));
+  const groups=[...GROUPS,['Other',d.fields.map(f=>f.field).filter(f=>!listed.has(f))]];
+  const row=f=>`<tr><td><strong>${esc(f.label)}</strong></td><td class="break-word">${summary(f)}</td><td class="break-word muted small">${now(f,d.accounts)}</td><td class="right nowrap"><span class="edit-action dist-actions"><button class="button small" data-dist="${f.field}">Edit</button><button class="button small" data-dist-apply="${f.field}">Apply</button></span></td></tr>`;
+  // Defined distributions first, by group; settings without one fold into a single line per group.
+  const sections=groups.map(([title,fields])=>{
+   const items=fields.map(f=>byField[f]).filter(Boolean);if(!items.length)return '';
+   const set=items.filter(f=>f.options.length),unset=items.filter(f=>!f.options.length);
+   return `<h3 class="dist-group">${esc(title)}</h3>${set.length?`<div class="dist-section">${table(['Setting','Distribution','Now',''],set.map(row))}</div>`:''}${unset.length?`<p class="dist-unset">No distribution yet (new accounts use the built-in defaults): ${unset.map(f=>`<button class="link-button" data-dist="${f.field}">${esc(f.label)}</button>`).join(' · ')}</p>`:''}`;
+  }).join('');
   root.innerHTML=card('Value distributions',
-   `<p class="card-intro">How account settings are spread across your ${d.accounts} accounts. New accounts follow these automatically; existing accounts change only when you apply them.</p>`+
-   table(['Setting','Distribution','Now',''],d.fields.map(f=>`<tr><td><strong>${esc(f.label)}</strong></td><td class="break-word">${summary(f)}</td><td class="break-word muted small">${now(f,d.accounts)}</td><td class="right nowrap"><span class="edit-action dist-actions"><button class="button small" data-dist="${f.field}">Edit</button><button class="button small" data-dist-apply="${f.field}" ${f.options.length?'':'disabled title="Define a distribution first"'}>Apply</button></span></td></tr>`)),
+   `<p class="card-intro">How account settings are spread across your ${d.accounts} accounts. New accounts follow these automatically; existing accounts change only when you apply them.</p>`+sections,
    '<span class="edit-action"><button class="button" id="apply-distributions">Apply to existing accounts…</button></span>');
-  root.querySelectorAll('[data-dist]').forEach(b=>b.onclick=()=>editor(d.fields.find(f=>f.field===b.dataset.dist),d.version));
+  root.querySelectorAll('[data-dist]').forEach(b=>b.onclick=()=>editor(byField[b.dataset.dist],d.version));
   root.querySelectorAll('[data-dist-apply]').forEach(b=>b.onclick=()=>apply(d,b.dataset.distApply));
   $('#apply-distributions').onclick=()=>apply(d);
  };

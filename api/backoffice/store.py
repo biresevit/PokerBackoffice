@@ -204,8 +204,12 @@ class Store:
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsConfirmedSeat=1) AS entries,
             (SELECT COUNT(*) FROM backoffice.EntryPresence e WHERE e.SiteId=p.SiteId AND e.BotAccountId=p.BotAccountId AND e.IsOpen=1 AND e.IsLiveOwner=1 AND e.IsConfirmedSeat=0) AS unconfirmed_entries,
             COALESCE(x.RingTables,0) AS active_tables,COALESCE(x.Tournaments,0) AS active_tournaments,
-            COALESCE(x.RingTables,0)+COALESCE(x.Tournaments,0) AS active_entries
+            COALESCE(x.RingTables,0)+COALESCE(x.Tournaments,0) AS active_entries,
+            s.StartedUtc AS session_start,s.PlannedEndUtc AS session_end,prior.ActualEndUtc AS last_session_end
             FROM scheduler.AccountPolicy p JOIN dbo.BotAccount b ON b.BotAccountId=p.BotAccountId
+            LEFT JOIN scheduler.AccountSession s ON s.BotAccountId=p.BotAccountId AND s.SiteId=p.SiteId AND s.IsOpen=1
+            OUTER APPLY(SELECT TOP(1) z.ActualEndUtc FROM scheduler.AccountSession z
+                WHERE z.BotAccountId=p.BotAccountId AND z.SiteId=p.SiteId AND z.IsOpen=0 ORDER BY z.ActualEndUtc DESC) prior
             LEFT JOIN scheduler.AccountDay d ON d.SiteId=p.SiteId AND d.BotAccountId=p.BotAccountId AND d.LocalDate=%s
             -- What the bot plays right now: ring tables it is seated at, and SNG/MTT entries it is registered for
             -- (accepted by the site) or playing.
@@ -759,6 +763,26 @@ class Store:
         self.db.execute("UPDATE backoffice.MachineMetadata SET Version=Version+1 WHERE MachineId=%s", machine_id)
         self.audit("machine.update", machine_id, {"max_entries": cap, "enabled": enabled, "allowed_sites": allowed})
         return {"version": machine["Version"] + 1}
+
+    def delete_machine(self, site_id, machine_id, body):
+        """Remove a machine from the workspace. History stays; pairing the same PC again brings it back."""
+        self.site(site_id)
+        if self.ctx.role != "operator":
+            raise Error(403, "Your account has view-only access")
+        machine = self.db.one("""SELECT m.MachineId,x.Version,COALESCE(x.HostName,m.Description) AS Name FROM dbo.CustomerMachine m
+            JOIN backoffice.MachineMetadata x WITH(UPDLOCK,HOLDLOCK) ON x.MachineId=m.MachineId
+            WHERE m.MachineId=%s AND m.CustomerId=%s AND m.IsActive=1""", machine_id, self.ctx.customer_id)
+        if not machine:
+            raise Error(404, "Machine not found")
+        if machine["Version"] != integer(body.get("version"), 1, 2**63 - 1, "version"):
+            raise Error(409, "Machine settings changed. Refresh and try again.")
+        if self.db.one("SELECT TOP(1) EntryId FROM scheduler.Entry WHERE MachineId=%s AND IsOpen=1", machine_id):
+            raise Error(409, "The machine still has open tables or tournament registrations. Disable it and let its bots finish first.")
+        if self.db.one("SELECT TOP(1) BotAccountId FROM scheduler.AccountLease WHERE MachineId=%s", machine_id):
+            raise Error(409, "An account is still logged in on this machine. Disable it and wait until its sessions end.")
+        self.db.execute("EXEC backoffice.RetireMachine @CustomerId=%s,@MachineId=%s", self.ctx.customer_id, machine_id)
+        self.audit("machine.delete", machine_id, {"name": machine["Name"]})
+        return {"deleted": machine_id}
 
     def overview(self, site_id):
         site = self.site(site_id)

@@ -112,8 +112,9 @@ def approve(store,site,body):
  runtime=profile(db,site);capacity=integer(body.get('capacity',30),1,10000,field='capacity')
  release=guid(body.get('release_id'),'release')
  if not db.one('SELECT ReleaseId FROM scheduler.UpdateRelease WHERE ReleaseId=%s AND Enabled=1',release):raise Error(404,'Release not available')
- existing=db.one('SELECT m.MachineId,g.CurrentReleaseId,g.LastHeartbeatUtc FROM dbo.CustomerMachine m LEFT JOIN scheduler.MachineUpdateAgent g ON g.MachineId=m.MachineId WHERE m.MacAddress=%s',address)
- if existing and (existing['CurrentReleaseId'] or existing['LastHeartbeatUtc'] and existing['LastHeartbeatUtc']>now()-timedelta(minutes=3)):raise Error(409,'This PC already has a managed installation; use its existing updater')
+ existing=db.one('SELECT m.MachineId,m.IsActive,g.CurrentReleaseId,g.LastHeartbeatUtc FROM dbo.CustomerMachine m LEFT JOIN scheduler.MachineUpdateAgent g ON g.MachineId=m.MachineId WHERE m.MacAddress=%s',address)
+ # A machine deleted on the Machines page is set up again from scratch; its old installation no longer counts.
+ if existing and existing['IsActive'] and (existing['CurrentReleaseId'] or existing['LastHeartbeatUtc'] and existing['LastHeartbeatUtc']>now()-timedelta(minutes=3)):raise Error(409,'This PC already has a managed installation; use its existing updater')
  mid=db.one('EXEC backoffice.RegisterPairedMachine @CustomerId=%s,@SiteId=%s,@Mac=%s,@Host=%s,@Capacity=%s',store.ctx.customer_id,site,address,row['HostName'],capacity)['MachineId']
  if db.one("SELECT t.TaskId FROM scheduler.MachineUpdateTask t JOIN scheduler.UpdateRollout r ON r.RolloutId=t.RolloutId WHERE t.MachineId=%s AND t.Status NOT IN ('completed','cancelled','failed','rolled_back') AND r.Status IN ('queued','running','paused')",mid):raise Error(409,'This machine already has a pending installation or update. Review that task before approving another setup.')
  cfg=Updates(store).enroll(site,{'machine_id':mid})
