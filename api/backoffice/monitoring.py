@@ -98,11 +98,17 @@ class Monitoring:
         missed_by_hour = {}
         for t in timeouts:
             missed_by_hour.setdefault(t["at"].replace(minute=0, second=0, microsecond=0), []).append(t)
-        series = []
+        series, by_street = [], {n: [] for n in STREETS}
         for hour in sorted(set(hours) | set(missed_by_hour)):
             s = summary(hours.get(hour, []))
-            series.append({"at": hour.replace(tzinfo=timezone.utc), "decisions": s["decisions"], "avg_ms": s["avg_ms"],
+            at = hour.replace(tzinfo=timezone.utc)
+            series.append({"at": at, "decisions": s["decisions"], "avg_ms": s["avg_ms"],
                            "max_ms": s["max_ms"], "missed": len(missed_by_hour.get(hour, []))})
+            for street in STREETS:
+                one = summary([r for r in hours.get(hour, []) if r["street"] == street])
+                if one["decisions"]:
+                    by_street[street].append({"at": at, "decisions": one["decisions"], "avg_ms": one["avg_ms"],
+                                              "max_ms": one["max_ms"], "p90_under_ms": one["p90_under_ms"]})
         per_machine = []
         for mid in sorted({r["machine"] for r in rows} | {t["machine"] for t in timeouts}):
             mine = [t for t in timeouts if t["machine"] == mid]
@@ -116,6 +122,7 @@ class Monitoring:
             "overall": summary(rows),
             "streets": [{"street": s, "name": n, **summary([r for r in rows if r["street"] == s])} for s, n in STREETS.items()],
             "per_machine": per_machine, "series": series,
+            "series_by_street": [{"street": n, "name": STREETS[n], "points": by_street[n]} for n in STREETS],
             "missed": {"total": len(timeouts), "sit_out": sum(t["kind"] == "sit_out" for t in timeouts),
                        "clock_acted": sum(t["kind"] == "clock_acted" for t in timeouts),
                        "recent": [{**t, "at": t["at"].replace(tzinfo=timezone.utc),

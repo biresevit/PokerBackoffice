@@ -236,3 +236,10 @@ tr.selected td{background:#f3f8ee}
 .monitor-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted,#6b7268);padding-top:6px}
 .monitor-legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 .monitor-legend i.avg{background:#2f6b4f}.monitor-legend i.missed{background:#c8553d}
+
+.monitor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 20px;padding:4px 8px}
+@media (max-width:900px){.monitor-grid{grid-template-columns:1fr}}
+.monitor-chart h3{font-size:15px;margin:6px 0 2px}
+.monitor-chart path.max{fill:none;stroke:#c9a227;stroke-width:1.5;stroke-dasharray:4 3}
+.monitor-chart circle.max{fill:#c9a227}
+.monitor-legend i.max{background:#c9a227}

@@ -47,6 +47,8 @@ def test_summary_by_street_pc_hour_and_missed_actions():
         "VMI3689543": (15, 0, 1), "WIN-PAJT": (10, 1, 0)}
     assert d["missed"] == {**d["missed"], "total": 2, "sit_out": 1, "clock_acted": 1}
     assert [p["decisions"] for p in d["series"]] == [5, 20] and d["series"][1]["missed"] == 2
+    streets = {s["name"]: [p["decisions"] for p in s["points"]] for s in d["series_by_street"]}
+    assert streets == {"Preflop": [20], "Flop": [], "Turn": [], "River": [5]}
 
 
 def test_filters_and_validation():
