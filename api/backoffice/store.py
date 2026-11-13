@@ -554,12 +554,14 @@ class Store:
         """Mark the MTTs whose early registration has started: from the start minus the plan's early hours (the
         default 2 h for an MTT without a plan) on, and every running one. Live tables shows only those by default."""
         from schedule_controller.mtt_plans import DEFAULT_EARLY_HOURS, series_name
-        hours = {r["SeriesName"]: float(r["EarlyHours"]) for r in self.db.rows(
-            "SELECT SeriesName,EarlyHours FROM scheduler.MttPlan WHERE SiteId=%s AND TotalBots>0", site_id)}
+        plans = {r["SeriesName"]: r for r in self.db.rows(
+            "SELECT SeriesName,EarlyHours,TotalBots FROM scheduler.MttPlan WHERE SiteId=%s AND TotalBots>0", site_id)}
+        hours = {name: float(r["EarlyHours"]) for name, r in plans.items()}
         now = datetime.now(timezone.utc)
         for row in rows:
             row["early_hours"] = hours.get(series_name(row["name"]), float(DEFAULT_EARLY_HOURS))
             row["planned"] = series_name(row["name"]) in hours
+            row["plan_total"] = int(plans[series_name(row["name"])]["TotalBots"]) if row["planned"] else 0
             start = row.get("start")
             if start is not None and start.tzinfo is None:
                 start = start.replace(tzinfo=timezone.utc)

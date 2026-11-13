@@ -275,8 +275,9 @@ def test_live_mtts_say_whether_early_registration_started():
                 return [mtt("a","Night Owl 13/11",3),mtt("b","Night Owl 14/11",5),mtt("c","Daily 13/11",1.5),
                         mtt("d","Daily 12/11",-1,"running"),mtt("e","Sunday Big",2.5)]
             if "FROM scheduler.MttPlan" in sql:
-                return [{"SeriesName":"Night Owl","EarlyHours":4},{"SeriesName":"Daily","EarlyHours":Decimal("1")}]
+                return [{"SeriesName":"Night Owl","EarlyHours":4,"TotalBots":30},{"SeriesName":"Daily","EarlyHours":Decimal("1"),"TotalBots":5}]
             return []
     items={t["id"]:t for t in Store(DB(),Context(14004,"test","subject","operator")).tables(1)["items"]}
     assert {k:v["early_registration_started"] for k,v in items.items()}=={"a":True,"b":False,"c":False,"d":True,"e":False}
     assert items["e"]["early_hours"]==2 and not items["e"]["planned"] and items["a"]["planned"]
+    assert items["a"]["plan_total"]==30 and items["e"]["plan_total"]==0
