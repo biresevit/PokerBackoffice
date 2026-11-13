@@ -134,7 +134,7 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings|mtts)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings|mtts|monitoring)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
@@ -229,6 +229,9 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
                 metric_match = re.fullmatch(r"(\d+)/metrics", tail)
                 if metric_match:
                     return response(store.machine_metrics(sid, int(metric_match[1]), request.query))
+            if section == "monitoring" and tail is None and method == "GET":
+                from .monitoring import Monitoring
+                return response(Monitoring(store).get(sid, request.query))
             if section == "mtts" and tail is None:
                 from .mtts import Mtts
                 mtts = Mtts(store)

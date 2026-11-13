@@ -5,16 +5,17 @@ import {installLivePanel} from './live-panel.js?v=20261111.bluffchat1';
 import {installDistributions} from './distributions-ui.js?v=20261112.accounts1';
 import {installAccounts,capacity as accountCapacity} from './accounts-ui.js?v=20261112.accounts2';
 import {installMtts} from './mtt-ui.js?v=20261112.mtt1';
+import {installMonitoring} from './monitoring-ui.js?v=20261113.mon1';
 import {installUpdates} from './updates-ui.js?v=20261108.machines';
 import {installChat} from './chat-ui.js?v=20261111.bluffchat1';
 import {installCasinoSettings} from './casino-settings.js?v=20261111.solver1';
 import {installMachineLogs} from './machine-logs.js?v=20261104.logs1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names = {overview:'Overview', accounts:'Accounts', schedule:'Weekly schedule', tables:'Live tables', chat:'Chat', tasks:'Tasks', sessions:'Sessions', stakes:'Stakes', machines:'Machines', updates:'Updates', histories:'Hand histories', winnings:'Winnings'};
-const symbols = {overview:'◈',accounts:'♙',schedule:'▦',tables:'♧',chat:'✉',tasks:'✓',sessions:'◷',stakes:'≋',machines:'▣',updates:'↻',histories:'▤',winnings:'∑'};
+const names = {overview:'Overview', accounts:'Accounts', schedule:'Weekly schedule', tables:'Live tables', chat:'Chat', tasks:'Tasks', sessions:'Sessions', stakes:'Stakes', machines:'Machines', monitoring:'Monitoring', updates:'Updates', histories:'Hand histories', winnings:'Winnings'};
+const symbols = {overview:'◈',accounts:'♙',schedule:'▦',tables:'♧',chat:'✉',tasks:'✓',sessions:'◷',stakes:'≋',machines:'▣',monitoring:'◔',updates:'↻',histories:'▤',winnings:'∑'};
 // Menu groups, in order of daily use. A page missing here is still listed, at the end.
-const navGroups = [['',['overview']],['Live',['tables','chat','sessions','tasks']],['Results',['histories','winnings']],['Setup',['accounts','schedule','stakes']],['Fleet',['machines','updates']]];
+const navGroups = [['',['overview']],['Live',['tables','chat','sessions','tasks']],['Results',['histories','winnings']],['Setup',['accounts','schedule','stakes']],['Fleet',['machines','monitoring','updates']]];
 const navLink = k => `<a href="#${k}" data-page="${k}"><span>${symbols[k]}</span>${names[k]}${k==='chat'?'<small id="chat-nav-badge" hidden></small>':''}</a>`;
 const navMenu = () => {const listed=navGroups.flatMap(g=>g[1]),rest=Object.keys(names).filter(k=>!listed.includes(k));
  return [...navGroups,...(rest.length?[['More',rest]]:[])].map(([label,keys])=>`${label?`<div class="nav-label">${label}</div>`:''}${keys.filter(k=>names[k]).map(navLink).join('')}`).join('');};
@@ -430,6 +431,8 @@ async function showHandReplay(id){
  }catch(e){d.close();toast(e.message);}
 }
 const drawDistributions=installDistributions({$,esc,siteApi,modal,toast,table,card,navigate});
+const monitoringUi=installMonitoring({$,esc,state,render,siteApi,table,card,stats,select,empty,toast,navigate});
+pages.monitoring=gen=>monitoringUi.page(gen);
 const mttUi=installMtts({$,esc,state,render,siteApi,modal,toast,table,card,pill,navigate,accountCapacity});
 const accountsUi=installAccounts({$,esc,state,render,siteApi,modal,toast,table,card,pill,field,select,button,navigate,tiers,drawDistributions,importDialog});
 const updatesUi=installUpdates({$,esc,state,pages,render,siteApi,date,pill,toast,download});

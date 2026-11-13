@@ -223,3 +223,16 @@ tr.selected td{background:#f3f8ee}
 .tournament-card h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tournament-card .lobby-foot .actions{display:flex;gap:.4rem;flex-shrink:0}
 .dialog-content h3{margin:.5rem 0 0}
+
+/* Monitoring: average decision time (line) and missed actions (bars) per hour */
+.monitor-chart{padding:8px 16px 14px}
+.monitor-chart svg{width:100%;height:auto;display:block}
+.monitor-chart line{stroke:var(--line,#e3e6df);stroke-width:1}
+.monitor-chart text{font-size:11px;fill:var(--muted,#6b7268)}
+.monitor-chart text.end{text-anchor:end}.monitor-chart text.middle{text-anchor:middle}
+.monitor-chart path.avg{fill:none;stroke:#2f6b4f;stroke-width:2}
+.monitor-chart circle.avg{fill:#2f6b4f}
+.monitor-chart rect.missed{fill:#c8553d;opacity:.75}
+.monitor-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted,#6b7268);padding-top:6px}
+.monitor-legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.monitor-legend i.avg{background:#2f6b4f}.monitor-legend i.missed{background:#c8553d}
