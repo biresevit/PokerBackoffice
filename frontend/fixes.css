@@ -220,3 +220,6 @@ tr.selected td{background:#f3f8ee}
 /* Live tables: registered bots of an MTT, opened from its card */
 .registered-list{columns:3 10rem;column-gap:1.5rem;margin:.75rem 0 0;padding-left:1.75rem;max-height:60vh;overflow:auto}
 .registered-list li{break-inside:avoid;padding:.1rem 0}
+.tournament-card h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tournament-card .lobby-foot .actions{display:flex;gap:.4rem;flex-shrink:0}
+.dialog-content h3{margin:.5rem 0 0}
