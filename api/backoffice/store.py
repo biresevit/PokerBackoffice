@@ -496,6 +496,8 @@ class Store:
               AND (t.TableType IN ('SNG','MTT') OR t.FullSnapshotUtc >= DATEADD(SECOND,-180,SYSUTCDATETIME()))
               AND EXISTS(SELECT 1 FROM scheduler.MachineAssignment o WHERE o.SiteId=t.SiteId AND o.MachineId=t.ObserverMachineId AND o.WorkerEpoch=t.ObserverEpoch AND o.IsReady=1 AND o.LastHeartbeatUtc>=DATEADD(second,-180,SYSUTCDATETIME()))
             ORDER BY t.BigBlind,t.TableName""", site_id)
+        if any(row["table_type"] == "MTT" for row in rows):
+            self._mtt_early_registration(site_id, [row for row in rows if row["table_type"] == "MTT"])
         for row in rows:
             if row["table_type"] in ("SNG", "MTT"):
                 # A tournament row has no seats; count our bots registered in or playing it, and list
@@ -534,6 +536,23 @@ class Store:
         rows.sort(key=live_table_sort_key)
         interval=self.db.one('SELECT LobbyRefreshSeconds AS seconds FROM scheduler.Site WHERE SiteId=%s',site_id)
         return {"items": rows, "as_of": datetime.now(timezone.utc),"refresh_seconds":interval["seconds"]}
+
+    def _mtt_early_registration(self, site_id, rows):
+        """Mark the MTTs whose early registration has started: from the start minus the plan's early hours (the
+        default 2 h for an MTT without a plan) on, and every running one. Live tables shows only those by default."""
+        from schedule_controller.mtt_plans import DEFAULT_EARLY_HOURS, series_name
+        hours = {r["SeriesName"]: float(r["EarlyHours"]) for r in self.db.rows(
+            "SELECT SeriesName,EarlyHours FROM scheduler.MttPlan WHERE SiteId=%s AND TotalBots>0", site_id)}
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            row["early_hours"] = hours.get(series_name(row["name"]), float(DEFAULT_EARLY_HOURS))
+            row["planned"] = series_name(row["name"]) in hours
+            start = row.get("start")
+            if start is not None and start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            row["early_registration_from"] = start - timedelta(hours=row["early_hours"]) if start else None
+            row["early_registration_started"] = (row.get("tournament_state") == "running" or start is None
+                                                 or now >= row["early_registration_from"])
 
     def request_live_view(self,site_id,table_id,account_id):
         self.site(site_id)

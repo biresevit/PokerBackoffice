@@ -1,7 +1,8 @@
 import base64
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import pytest
 from backoffice.app import Request, handle, principal
 from backoffice.store import Context, Store, live_table_sort_key, scheduled_target
@@ -254,3 +255,28 @@ def test_task_and_session_ranges_use_site_wall_clock():
     for bad in ({"from": "yesterday"}, {"from": "2026-11-01T10:00", "to": "2026-11-01T09:00"}):
         with pytest.raises(Error):
             local_range(bad, zone, now)
+
+
+def test_live_mtts_say_whether_early_registration_started():
+    now=datetime.now(timezone.utc).replace(tzinfo=None)
+    def mtt(id,name,hours_ahead,state="registering"):
+        return {"id":id,"name":name,"game":"NLH","table_type":"MTT","big_blind":0,"currency":"EUR","seats":3000,
+                "occupied":5,"observed":now,"snapshot":None,"is_open":True,"buy_in":0,
+                "start":now+timedelta(hours=hours_ahead),"tournament_state":state}
+    class DB:
+        def execute(self, sql, *params): pass
+        def one(self, sql, *params):
+            if "LobbyRefreshSeconds" in sql: return {"seconds":15}
+            if "FROM scheduler.Site" in sql:
+                return {"id":1,"name":"B","customer_id":14004,"timezone":"UTC","currency":"EUR","version":1,"enabled":True}
+            return {"n":0}
+        def rows(self, sql, *params):
+            if "FROM scheduler.LobbyTable" in sql:
+                return [mtt("a","Night Owl 13/11",3),mtt("b","Night Owl 14/11",5),mtt("c","Daily 13/11",1.5),
+                        mtt("d","Daily 12/11",-1,"running"),mtt("e","Sunday Big",2.5)]
+            if "FROM scheduler.MttPlan" in sql:
+                return [{"SeriesName":"Night Owl","EarlyHours":4},{"SeriesName":"Daily","EarlyHours":Decimal("1")}]
+            return []
+    items={t["id"]:t for t in Store(DB(),Context(14004,"test","subject","operator")).tables(1)["items"]}
+    assert {k:v["early_registration_started"] for k,v in items.items()}=={"a":True,"b":False,"c":False,"d":True,"e":False}
+    assert items["e"]["early_hours"]==2 and not items["e"]["planned"] and items["a"]["planned"]
