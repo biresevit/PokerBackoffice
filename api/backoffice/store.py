@@ -504,6 +504,19 @@ class Store:
                 # the ones the tournament seated (they can be watched live).
                 row["bot_entries"] = self.db.one("""SELECT COUNT(*) AS n FROM scheduler.Entry
                     WHERE SiteId=%s AND TableId=%s AND IsOpen=1""", site_id, row["id"])["n"]
+                if row["table_type"] == "MTT":
+                    # Each bot entry of the MTT: registered at the site (confirmed by its PC) and still in it,
+                    # out (was seated, entry closed), or a join no PC has confirmed yet.
+                    bots = self.db.rows("""SELECT b.Username AS username,
+                            CASE WHEN e.IsOpen=1 AND (e.LastConfirmedUtc IS NOT NULL OR e.SeatedUtc IS NOT NULL) THEN 'in'
+                                 WHEN e.IsOpen=1 THEN 'pending' ELSE 'out' END AS state
+                        FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
+                        WHERE e.SiteId=%s AND e.TableId=%s AND e.Status<>'failed'
+                          AND (e.IsOpen=1 OR e.SeatedUtc IS NOT NULL) ORDER BY b.Username""", site_id, row["id"])
+                    row["bots"] = bots
+                    row["bots_in"] = sum(b["state"] == "in" for b in bots)
+                    row["bots_out"] = sum(b["state"] == "out" for b in bots)
+                    row["bots_pending"] = sum(b["state"] == "pending" for b in bots)
                 row["registered_bots"] = [r["username"] for r in self.db.rows("""SELECT b.Username AS username
                     FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
                     WHERE e.SiteId=%s AND e.TableId=%s AND e.IsOpen=1 AND e.Status<>'seated' ORDER BY b.Username""",
