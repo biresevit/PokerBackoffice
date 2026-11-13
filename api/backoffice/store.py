@@ -507,7 +507,8 @@ class Store:
                 if row["table_type"] == "MTT":
                     # Each bot entry of the MTT: registered at the site (confirmed by its PC) and still in it,
                     # out (was seated, entry closed), or a join no PC has confirmed yet.
-                    bots = self.db.rows("""SELECT b.Username AS username,
+                    bots = self.db.rows("""SELECT b.Username AS username,e.FinishPlace AS place,
+                            CONVERT(bit,CASE WHEN e.WonFromEntryId IS NULL THEN 0 ELSE 1 END) AS ticket,
                             CASE WHEN e.IsOpen=1 AND (e.LastConfirmedUtc IS NOT NULL OR e.SeatedUtc IS NOT NULL) THEN 'in'
                                  WHEN e.IsOpen=1 THEN 'pending' ELSE 'out' END AS state
                         FROM scheduler.Entry e JOIN dbo.BotAccount b ON b.BotAccountId=e.BotAccountId
