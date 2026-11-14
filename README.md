@@ -1,5 +1,7 @@
 # PokerBackoffice | Operations dashboard
 
+> **Permitted use:** These bots may only be used for research, poker practice in the [simulator](https://github.com/biresevit/simulator-portfolio), poker practice through a real poker-site client, or authorized load testing to assess a poker site's stability under high traffic. Running bots at real-money tables without disclosing their use to all human players is prohibited.
+
 A customer-scoped web dashboard for a distributed poker automation platform, covering schedules, accounts, live tables, hand-history replay, reporting, and machine updates.
 
 ## Engineering highlights
@@ -39,8 +41,8 @@ Customer-scoped Azure SQL backoffice with a static HTML/JavaScript frontend and 
 ## Included
 
 - Microsoft sign-in with explicit subject-to-customer membership; viewer/operator roles.
-- Accounts and profile/settings editor, session duration bounds, daily playtime preference, stake/frequency, buy-in weights, post-BB and run-it-twice probabilities.
-- CSV preview/apply (`username,profile`, or `nickname,profile`). Upsert updates only profiles of existing accounts. Replace explicitly deletes absent accounts. Deletes are soft and reject live entries/leases. Existing ownership is never reassigned by CSV.
+- Account management and session scheduling.
+- CSV preview and apply with ownership checks, soft deletion, and protection for live entries and leases.
 - Weekly schedule editing, site stake ranges/percentages, machine capacity and allowed sites.
 - Lobby-style live table cards with total players/bot entries and a database-configured refresh interval. A user may open a ten-minute, per-bot diagnostic window; only the owning machine responds and only the selected hero's hole cards are exposed.
 - Scoped hand-history paging (10/50/100), bot/game/date/blind filters, per-hand hero winnings and human counts, newest/oldest/winnings sorting, all-filtered ZIP downloads, paged bot winnings, and a step-by-step browser replay. Per-player results are calculated once by Azure ingestion and reports are indexed SQL aggregations; opening a replay/download is the only report UI path that reads history blobs.
