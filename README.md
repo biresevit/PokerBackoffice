@@ -1,4 +1,36 @@
-# Poker Control backoffice
+# PokerBackoffice | Operations dashboard
+
+A customer-scoped web dashboard for a distributed poker automation platform, covering schedules, accounts, live tables, hand-history replay, reporting, and machine updates.
+
+## Engineering highlights
+
+- Static HTML/JavaScript frontend and a Python API hosted by Azure Static Web Apps.
+- Explicit identity membership, viewer/operator roles, and customer-scoped Azure SQL queries.
+- Interactive reporting, replay, live diagnostics, and signed rolling updates.
+
+**Technology:** HTML, CSS, JavaScript, Python, Azure Static Web Apps, Azure SQL, Blob Storage.
+
+## Platform architecture
+
+```text
+PokerBackoffice -> Azure SQL <- ScheduleController (Azure Functions)
+                                     | commands / telemetry
+                                PokerController
+                                     | REST
+                                  PDecision
+                                     |
+                         simulator / DecisionMaking
+```
+
+[PokerBackoffice](https://github.com/biresevit/PokerBackoffice) | [ScheduleController](https://github.com/biresevit/ScheduleController) | [PokerController](https://github.com/biresevit/PokerController) | [PDecision](https://github.com/biresevit/PDecision-portfolio) | [simulator](https://github.com/biresevit/simulator-portfolio)
+
+## Product view
+
+![Scheduled targets and observed activity in PokerBackoffice](images/overview.png)
+
+## Setup and operations
+
+A full deployment requires configured infrastructure, platform accounts, and companion components. The following sections describe setup, validation, and operational requirements.
 
 **Deploying:** see [docs/deploy.md](docs/deploy.md) for every component of the fleet (migrations, scheduler function, backoffice, PC releases, PDecision), in order.
 
