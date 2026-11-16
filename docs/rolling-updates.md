@@ -2,6 +2,12 @@
 
 Operators order updates from the **Updates** page. Select a signed release, select PCs in the required order, choose **Wait for sessions to finish** or **Update immediately**, and optionally choose a start time in the site timezone. Update tasks also appear in **Tasks ? Update PC**.
 
+![Scheduling an update: release, start time, mode and PCs with their updater status](../images/machines_updates.png)
+
+**Past updates** lists each rollout with every PC's status, progress, start and finish time.
+
+![Past updates: per-PC status, progress, start and finish times](../images/past_updates.png)
+
 The scheduler serializes updates across the whole customer, including multiple sites. It downloads and verifies a release before pausing new joins. Other PCs continue their normal schedules throughout.
 
 Updater 1.0.20 shares successful status requests between its heartbeat and installation loops. Idle installations are checked every 15 seconds, with independent heartbeats during long downloads or startup. Diagnostic collectors use one file lock per PC and poll every 15 seconds; another collector takes over when the owner exits. The application rollout upgrades an older installed agent automatically.

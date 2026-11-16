@@ -30,6 +30,24 @@ PokerBackoffice -> Azure SQL <- ScheduleController (Azure Functions)
 
 ![Scheduled targets and observed activity in PokerBackoffice](images/overview.png)
 
+The overview compares the scheduled target with what actually ran, next to live counts and machine health.
+
+### Weekly schedule
+
+Operators set hour-by-hour targets for each day and game format. The cloud scheduler turns them into join and leave commands for the PCs.
+
+![Weekly schedule: ring targets for each day of the week](images/weekly_schedule.png)
+
+### Scheduled updates for the PC fleet
+
+A signed release is rolled out from the cloud to the selected PCs, now or at a set time. By default each PC finishes its sessions before installing.
+
+![Scheduling an update: release, start time, mode and PCs with their updater status](images/machines_updates.png)
+
+Each PC's updater reports its progress back, so the page shows every machine's status until it is healthy and its traffic has recovered.
+
+![Past updates: per-PC status, progress, start and finish times](images/past_updates.png)
+
 ## Setup and operations
 
 A full deployment requires configured infrastructure, platform accounts, and companion components. The following sections describe setup, validation, and operational requirements.

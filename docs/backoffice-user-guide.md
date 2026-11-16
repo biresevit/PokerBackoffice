@@ -125,11 +125,11 @@ How many bots should play, hour by hour, for each day of the week, separately fo
 
 ![Weekly schedule: ring targets for each day](../images/weekly_schedule.png)
 
-1. Click **+ Add window**.
+1. Click **Add** above the chart.
 2. Pick the days (or **Every day**, **Weekdays**, **Weekend**), a start and end time, and the number of entries.
 3. Click **Add and save**. The window stays open so you can add more; click **Done** when finished.
 
-Select a block and click **Edit window** to change or remove it.
+Select a block and click **Edit** (or double-click it) to change it, or **Remove** to delete it.
 
 ![Adding a schedule window](../images/add_schedule_window.png)
 
@@ -146,6 +146,12 @@ Select a block and click **Edit window** to change or remove it.
 **Machines** lists the PCs running your bots: whether each is online, its CPU, memory and disk use, its running entries against its capacity, and the software versions. **Logs** collects a PC's logs for troubleshooting.
 
 **Updates** installs new software releases on your PCs. Choose a release and the PCs, then schedule it: normally a PC finishes its sessions first and then updates; **Update immediately** interrupts play straight away.
+
+![Scheduling an update](../images/machines_updates.png)
+
+**Past updates** shows how each PC's update went: its status, progress, and start and finish times.
+
+![Past updates](../images/past_updates.png)
 
 ### Adding a new PC
 
