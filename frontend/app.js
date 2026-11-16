@@ -1,5 +1,5 @@
 import {liveDisplaySnapshot,formatLiveAmount} from './live-amounts.js?v=20261103.nativechips1';
-import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261116.schedule-remove';
+import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261116.schedule-toolbar';
 import {ManualControls} from './manual-controls.js?v=20261103.tmanual1';
 import {installLivePanel} from './live-panel.js?v=20261111.bluffchat1';
 import {installDistributions} from './distributions-ui.js?v=20261112.accounts1';
@@ -214,7 +214,7 @@ pages.schedule=async gen=>{
  // MTTs are planned per tournament (mtt-ui.js), not by weekly windows.
  if(fmt==='MTT')return mttUi.page(gen,tabs);
  const d=await siteApi('schedule?format='+fmt);let windows=structuredClone(d.windows),version=d.version;
- if(!render(gen,'Recurring targets per game format in your site’s local timezone. Every add, edit and removal saves immediately.',tabs+`<div id="capacity-note"></div><div class="joins-switch${d.joins_paused?' paused':''}"><label><input type="checkbox" role="switch" id="joins-switch" ${d.joins_paused?'':'checked'}><span class="track"><span class="knob"></span></span><strong>${d.joins_paused?'Joins paused':'Joins running'}</strong></label><span>${d.joins_paused?'Bots don’t join ring tables or register for SNGs and MTTs until you switch this back on. Seated bots keep playing and sessions still end on schedule.':'Bots join ring tables and register for SNGs and MTTs by the targets below. Switch off to stop new joins and registrations on all formats.'}</span></div><div class="notice">${d.enabled?'Scheduling is enabled.':'Scheduling is paused.'} Timezone: ${esc(d.timezone)} · ${esc(fmtLabel)} target: ${esc(meaning)} Changes auto-save.</div>`+card(`${fmtLabel} weekly targets`,'<div class="card-body" id="week"></div>'),`<span class="edit-action">${button('+ Add window','add-window',true)}</span>`))return;
+ if(!render(gen,'Recurring targets per game format in your site’s local timezone. Every add, edit and removal saves immediately.',tabs+`<div id="capacity-note"></div><div class="joins-switch${d.joins_paused?' paused':''}"><label><input type="checkbox" role="switch" id="joins-switch" ${d.joins_paused?'':'checked'}><span class="track"><span class="knob"></span></span><strong>${d.joins_paused?'Joins paused':'Joins running'}</strong></label><span>${d.joins_paused?'Bots don’t join ring tables or register for SNGs and MTTs until you switch this back on. Seated bots keep playing and sessions still end on schedule.':'Bots join ring tables and register for SNGs and MTTs by the targets below. Switch off to stop new joins and registrations on all formats.'}</span></div><div class="notice">${d.enabled?'Scheduling is enabled.':'Scheduling is paused.'} Timezone: ${esc(d.timezone)} · ${esc(fmtLabel)} target: ${esc(meaning)} Changes auto-save.</div>`+card(`${fmtLabel} weekly targets`,'<div class="card-body" id="week"></div>')))return;
  document.querySelectorAll('[data-schedule-format]').forEach(b=>b.onclick=()=>{state.scheduleFormat=b.dataset.scheduleFormat;navigate();});
  const capacityNote=async list=>{
   // The schedule asks for more than the enabled accounts can hold: say so instead of letting the target go unmet.
@@ -231,6 +231,7 @@ pages.schedule=async gen=>{
  const draw=()=>{
   $('#week').innerHTML=weeklyTargetChart(windows,days,d.timezone);
   bindWeeklyTargetChart($('#week'),windows,days,index=>openWindow(index),async index=>{if(state.customer.role!=='operator')return;try{await persist(windows.filter((_,i)=>i!==index),'Schedule window removed');}catch(error){toast(error.message,true);}});
+  $('#add-window').onclick=()=>openWindow();
   capacityNote(windows);
  };
  draw();
@@ -246,7 +247,6 @@ pages.schedule=async gen=>{
   if(editing)$('#remove-window').onclick=async()=>{const controls=dialog.querySelectorAll('button');controls.forEach(b=>b.disabled=true);$('.dialog-error',dialog).textContent='';try{await persist(windows.filter((_,i)=>i!==index),'Schedule window removed');dialog.close();}catch(error){$('.dialog-error',dialog).textContent=error.message;}finally{controls.forEach(b=>b.disabled=false);}};
   dialog.showModal();
  };
- $('#add-window').onclick=()=>openWindow();
 };
 const clock=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
 const minutes=t=>{const [h,m]=t.split(':').map(Number);return h*60+m;};

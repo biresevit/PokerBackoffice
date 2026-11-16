@@ -28,6 +28,8 @@ with sync_playwright() as p:
  page.route('**/api/**',route_api)
  page.goto('http://127.0.0.1:4296/backoffice/?site_id=1#schedule')
  page.locator('.weekly-target-chart').wait_for(timeout=30000)
+ assert page.locator('.weekly-edit-toolbar button').all_text_contents()==['Edit','Add','Remove']
+ assert page.get_by_role('button',name='Add',exact=True).count()==1
  assert page.locator('.weekly-time-tick').count()==13
  assert page.locator('.weekly-time-tick.first').inner_text()=='00:00'
  assert page.locator('.weekly-time-tick.last').inner_text()=='24:00'
@@ -44,9 +46,9 @@ with sync_playwright() as p:
  exact.hover();assert '09:10–10:55' in page.locator('.weekly-selection-text').inner_text()
  position=exact.bounding_box()
  assert abs((position['x']-track['x'])-track['width']*550/1440)<2
- exact.click();high.hover();page.get_by_role('button',name='Edit window',exact=True).hover()
+ exact.click();high.hover();page.get_by_role('button',name='Edit',exact=True).hover()
  assert '09:10'+chr(0x2013)+'10:55' in page.locator('.weekly-selection-text').inner_text()
- page.get_by_role('button',name='Edit window',exact=True).click()
+ page.get_by_role('button',name='Edit',exact=True).click()
  assert page.get_by_role('heading',name='Edit schedule window',exact=True).is_visible()
  assert page.locator('#dialog [name=start]').input_value()=='09:10'
  assert page.locator('#dialog [name=end]').input_value()=='10:55'
@@ -85,7 +87,7 @@ with sync_playwright() as p:
  page.wait_for_function("document.querySelectorAll('[data-window]').length===8")
  assert page.get_by_role('button',name='Remove',exact=True).is_disabled()
  assert len(writes)==2 and len(writes[-1]['windows'])==len(windows)-1
- page.get_by_role('button',name='+ Add window',exact=True).click()
+ page.get_by_role('button',name='Add',exact=True).click()
  page.get_by_role('button',name='Clear',exact=True).click()
  page.locator('#dialog [name=weekdays][value="2"]').locator('..').click()
  page.locator('#dialog [name=start]').fill('22:00')
