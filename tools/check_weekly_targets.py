@@ -1,4 +1,4 @@
-"""Browser checks for precise, readable weekly targets; never saves a schedule."""
+"""Browser checks for precise, readable weekly targets; uses mocked saves only."""
 import json
 from playwright.sync_api import sync_playwright
 windows=[
@@ -19,11 +19,14 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:errors.append(str(e)))
  def route_api(route):
   request=route.request
-  if request.method!='GET':writes.append(request.url);route.abort();return
+  if request.method!='GET':
+   if '/sites/1/schedule' in request.url:
+    writes.append(request.post_data_json);route.fulfill(json={'version':len(writes)+1});return
+   route.abort();return
   if '/sites/1/schedule?' in request.url:route.fulfill(json={'enabled':True,'timezone':'Europe/Budapest','version':1,'windows':windows})
   else:route.continue_()
  page.route('**/api/**',route_api)
- page.goto('http://127.0.0.1:4296/#schedule')
+ page.goto('http://127.0.0.1:4296/backoffice/?site_id=1#schedule')
  page.locator('.weekly-target-chart').wait_for(timeout=30000)
  assert page.locator('.weekly-time-tick').count()==13
  assert page.locator('.weekly-time-tick.first').inner_text()=='00:00'
@@ -44,7 +47,19 @@ with sync_playwright() as p:
  exact.click();high.hover();page.get_by_role('button',name='Edit window',exact=True).hover()
  assert '09:10'+chr(0x2013)+'10:55' in page.locator('.weekly-selection-text').inner_text()
  page.get_by_role('button',name='Edit window',exact=True).click()
- assert page.locator('[data-window-row="1"] [data-window-field="target"]').evaluate('(e)=>document.activeElement===e')
+ assert page.get_by_role('heading',name='Edit schedule window',exact=True).is_visible()
+ assert page.locator('#dialog [name=start]').input_value()=='09:10'
+ assert page.locator('#dialog [name=end]').input_value()=='10:55'
+ assert page.locator('#dialog [name=target]').input_value()=='15'
+ assert page.locator('#dialog [name=weekdays]:checked').evaluate_all('(els)=>els.map(e=>e.value)')==['0']
+ page.get_by_role('button',name='Cancel',exact=True).click()
+ assert page.locator('#windows').count()==0
+ assert page.get_by_role('heading',name='Ring schedule windows',exact=True).count()==0
+ toolbar=page.locator('.weekly-edit-toolbar').bounding_box()
+ assert toolbar['y']<page.locator('.weekly-target-chart').bounding_box()['y']
+ exact.dblclick()
+ assert page.locator('#dialog [name=target]').input_value()=='15'
+ page.get_by_role('button',name='Cancel',exact=True).click()
  page.locator('#week').locator('..').scroll_into_view_if_needed()
  page.screenshot(path='artifacts/weekly-targets-desktop.png')
  page.set_viewport_size({'width':390,'height':844})
@@ -58,7 +73,28 @@ with sync_playwright() as p:
  page.screenshot(path='artifacts/weekly-targets-mobile.png')
  html=page.evaluate("""async()=>{const {weeklyTargetChart}=await import('/weekly-targets.js');return weeklyTargetChart([{weekday:0,start_minute:0,end_minute:60,target:0}],['Monday'],'Europe/Budapest');}""")
  assert 'Peak: 0' in html and 'NaN' not in html and 'Infinity' not in html
- assert not writes,writes
+ # Saving replaces the chosen window instead of appending a duplicate.
+ page.locator('[data-window="4"]').dblclick()
+ page.locator('#dialog [name=target]').fill('12')
+ page.get_by_role('button',name='Save changes',exact=True).click()
+ page.wait_for_function("!document.querySelector('#dialog').open")
+ assert len(writes)==1 and len(writes[-1]['windows'])==len(windows)
+ assert [w for w in writes[-1]['windows'] if w['weekday']==2]==[dict(windows[4],target=12)]
+ page.locator('[data-window="8"]').dblclick()
+ page.get_by_role('button',name='Remove window',exact=True).click()
+ page.wait_for_function("!document.querySelector('#dialog').open")
+ assert len(writes)==2 and len(writes[-1]['windows'])==len(windows)-1
+ page.get_by_role('button',name='+ Add window',exact=True).click()
+ page.get_by_role('button',name='Clear',exact=True).click()
+ page.locator('#dialog [name=weekdays][value="2"]').locator('..').click()
+ page.locator('#dialog [name=start]').fill('22:00')
+ page.locator('#dialog [name=end]').fill('24:00')
+ page.locator('#dialog [name=target]').fill('0')
+ page.get_by_role('button',name='Add and save',exact=True).click()
+ page.wait_for_function("document.querySelectorAll('[data-window]').length===9")
+ assert len(writes)==3 and writes[-1]['windows'][-1]=={'weekday':2,'start_minute':1320,'end_minute':1440,'target':0}
+ assert page.locator('#dialog').is_visible()
+ page.get_by_role('button',name='Done',exact=True).click()
  assert not errors,errors
  browser.close()
- print('Two-hour axis, exact boundaries, peak colors, contrast, selection/edit, zero targets and mobile scrolling passed. No schedule was changed.')
+ print('Two-hour axis, exact boundaries, peak colors, contrast, selection, double-click/edit/save/remove, add through midnight, zero targets and mobile scrolling passed. All saves were mocked.')

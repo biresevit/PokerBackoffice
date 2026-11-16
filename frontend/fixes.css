@@ -243,3 +243,5 @@ tr.selected td{background:#f3f8ee}
 .monitor-chart path.max{fill:none;stroke:#c9a227;stroke-width:1.5;stroke-dasharray:4 3}
 .monitor-chart circle.max{fill:#c9a227}
 .monitor-legend i.max{background:#c9a227}
+
+.weekly-edit-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.weekly-edit-toolbar .sub{font-size:12px}
