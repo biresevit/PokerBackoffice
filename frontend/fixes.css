@@ -245,3 +245,12 @@ tr.selected td{background:#f3f8ee}
 .monitor-legend i.max{background:#c9a227}
 
 .weekly-edit-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.weekly-edit-toolbar .sub{font-size:12px}
+.mtt-overview{padding:20px 24px}
+.mtt-overview-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
+.mtt-overview-summary>div{padding:16px;background:var(--surface-alt,#f6f8f3);border-radius:10px}
+.mtt-overview-summary span{display:block;font-size:13px;color:#62736a}
+.mtt-overview-summary strong{display:block;font-size:28px;margin-top:6px}
+.mtt-overview .number{text-align:right;font-variant-numeric:tabular-nums}
+.mtt-overview .mtt-shortfall{color:#986518;font-weight:600}
+.mtt-overview .nowrap{white-space:nowrap}
+@media(max-width:700px){.mtt-overview{padding:16px}.mtt-overview-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}

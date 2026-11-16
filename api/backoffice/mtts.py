@@ -4,6 +4,7 @@ how many hours before the start early registration begins. The scheduler reads s
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from schedule_controller.mtt_plans import (DEFAULT_EARLY_HOURS, DEFAULT_EARLY_PERCENT, MttPlan, desired, late_registration,
                                            parse_info, recurrence, registration_window, series_name, split)
@@ -29,6 +30,42 @@ def plan_json(row):
 class Mtts:
     def __init__(self, store):
         self.store, self.db, self.ctx = store, store.db, store.ctx
+
+    def overview(self, site_id, query):
+        site=self.store.site(site_id)
+        zone=ZoneInfo(site['timezone']);now=datetime.now(timezone.utc)
+        try:
+            first=datetime.strptime(query.get('from') or now.astimezone(zone).date().isoformat(),'%Y-%m-%d').date()
+            last=datetime.strptime(query.get('to') or now.astimezone(zone).date().isoformat(),'%Y-%m-%d').date()
+        except (ValueError,TypeError):
+            raise Error(400,'From and To must be valid dates')
+        if last<first:raise Error(400,'To date must not be before From date')
+        if (last-first).days>=92:raise Error(400,'MTT overview range cannot exceed 92 days')
+        start=datetime.combine(first,datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        stop=datetime.combine(last+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
+        rows=self.db.rows("""SELECT l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState,
+                COUNT(DISTINCT CASE WHEN registration.Confirmed=1 OR e.SeatedUtc IS NOT NULL
+                    OR (e.Status<>'failed' AND e.LastConfirmedUtc IS NOT NULL)
+                    THEN e.BotAccountId END) AS registered,
+                COUNT(DISTINCT CASE WHEN e.SeatedUtc IS NOT NULL THEN e.BotAccountId END) AS ever_seated,
+                COUNT(DISTINCT CASE WHEN e.IsOpen=1 AND e.IsLiveOwner=1 AND e.SeatedUtc IS NOT NULL
+                    AND e.Status IN ('seated','sitting_out','draining') THEN e.BotAccountId END) AS running
+            FROM scheduler.LobbyTable l
+            LEFT JOIN backoffice.EntryPresence e ON e.SiteId=l.SiteId AND e.TableId=l.TableId
+            OUTER APPLY (SELECT TOP(1) 1 AS Confirmed FROM scheduler.Command c
+                WHERE c.EntryId=e.EntryId AND c.Kind='join' AND c.Status='succeeded' AND c.ResultCode IS NULL
+                  AND JSON_VALUE(c.PayloadJson,'$.resume_registration') IS NULL) registration
+            WHERE l.SiteId=%s AND l.TableType='MTT' AND l.StartUtc>=%s AND l.StartUtc<%s
+            GROUP BY l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState
+            ORDER BY l.StartUtc,l.TableName,l.TableId""",site_id,start,stop)
+        plans={r['SeriesName']:r['TotalBots'] for r in self.db.rows(
+            'SELECT SeriesName,TotalBots FROM scheduler.MttPlan WHERE SiteId=%s',site_id)}
+        items=[dict(id=r['TableId'],name=r['TableName'],game=r['GameType'],start=utc(r['StartUtc']),
+                    state=r['TournamentState'],scheduled=plans.get(series_name(r['TableName'])),
+                    registered=r['registered'],running=r['running'],ever_seated=r['ever_seated']) for r in rows]
+        return dict(format='MTT',view='tournaments',timezone=site['timezone'],**{'from':first.isoformat(),'to':last.isoformat()},
+                    as_of=now,items=items,totals={key:sum(i[key] or 0 for i in items)
+                    for key in ('scheduled','registered','running','ever_seated')})
 
     def list(self, site_id):
         site = self.store.site(site_id)

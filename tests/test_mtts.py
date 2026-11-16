@@ -89,3 +89,40 @@ def test_planned_target_counts_registrations_due_across_planned_starts():
     target = planned_target(db, 1006, NOW, NOW)
     assert target(start - timedelta(hours=3)) == 0
     assert 0 < target(NOW) < 10 and target(start - timedelta(minutes=2)) == 10
+
+
+def test_overview_keeps_completed_and_unplanned_tournaments_and_separates_live_from_ever_seated():
+    class OverviewDb(Db):
+        def rows(self,sql,*args):
+            if 'FROM scheduler.LobbyTable l' in sql:
+                self.bounds=args
+                return [dict(lobby('Turbo Night',NOW,state='completed'),registered=23,running=0,ever_seated=16),
+                        dict(lobby('No plan',NOW,table='T2'),registered=0,running=0,ever_seated=0)]
+            return super().rows(sql,*args)
+    db=OverviewDb(plans=[plan('Turbo Night',total=23)])
+    result=mtts(db).overview(1006,{'from':'2026-11-16','to':'2026-11-16'})
+    assert db.bounds==(1006,datetime(2026,11,15,23),datetime(2026,11,16,23))
+    assert len(result['items'])==2 and result['items'][0]['state']=='completed'
+    assert result['items'][0]['scheduled']==23 and result['items'][1]['scheduled'] is None
+    assert result['totals']==dict(scheduled=23,registered=23,running=0,ever_seated=16)
+    assert not db.executed
+
+
+@pytest.mark.parametrize('query',[
+    {'from':'bad'}, {'from':'2026-02-30'}, {'from':'2026-11-17','to':'2026-11-16'},
+    {'from':'2026-01-01','to':'2026-04-03'},
+])
+def test_overview_rejects_invalid_or_unbounded_dates(query):
+    with pytest.raises(Error) as error:mtts(Db()).overview(1006,query)
+    assert error.value.status==400
+
+
+def test_overview_allows_future_dates_and_uses_local_daylight_saving_boundaries():
+    class OverviewDb(Db):
+        def rows(self,sql,*args):
+            if 'FROM scheduler.LobbyTable l' in sql:self.bounds=args
+            return []
+    db=OverviewDb()
+    result=mtts(db).overview(1006,{'from':'2030-03-31','to':'2030-03-31'})
+    assert db.bounds==(1006,datetime(2030,3,30,23),datetime(2030,3,31,22))
+    assert result['items']==[] and all(n==0 for n in result['totals'].values())

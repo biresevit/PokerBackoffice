@@ -232,6 +232,9 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             if section == "monitoring" and tail is None and method == "GET":
                 from .monitoring import Monitoring
                 return response(Monitoring(store).get(sid, request.query))
+            if section == "mtts" and tail == "overview" and method == "GET":
+                from .mtts import Mtts
+                return response(Mtts(store).overview(sid,request.query))
             if section == "mtts" and tail is None:
                 from .mtts import Mtts
                 mtts = Mtts(store)

@@ -170,31 +170,41 @@ const formatEntries=(d,fmt)=>{
  return {value:`${seated+registered+other} / ${target}`,note:`${seated} playing · ${registered} registered${other?` · ${other} pending`:''}`};
 };
 const chartFormatLabels={RING:'Ring',SNG:'SNG',MTT:'MTT'};
+function mttOverview(d){
+ const counts=[['scheduled','Scheduled'],['registered','Registered'],['running','Running · confirmed seated'],['ever_seated','Ever confirmed seated']];
+ const summary=`<div class="mtt-overview-summary">${counts.map(([key,label])=>`<div><span>${label}</span><strong>${d.totals[key]}</strong></div>`).join('')}</div>`;
+ const rows=d.items.map(i=>`<tr><td class="nowrap">${esc(date(i.start,d.timezone))}</td><td><strong>${esc(i.name)}</strong><span class="sub">${esc(i.game||'')}</span></td><td>${pill(i.state==='running'?'Running':i.state==='registering'?'Registering':i.state==='completed'?'Completed':i.state||'Unknown',i.state==='running'?'green':'gray')}</td><td class="number">${i.scheduled??'—'}</td><td class="number ${i.scheduled!=null&&i.registered<i.scheduled?'mtt-shortfall':''}">${i.registered}</td><td class="number">${i.running}</td><td class="number ${i.ever_seated<i.registered?'mtt-shortfall':''}">${i.ever_seated}</td></tr>`);
+ return `<div class="mtt-overview">${summary}<p class="sub">Tournaments starting in the selected dates · ${esc(d.timezone)}. Unique bots per tournament; running shows bots seated now, and ever seated includes eliminated bots. Scheduled reflects the current plan.</p>${rows.length?table(['Start','Tournament','Status','Scheduled','Registered','Running · confirmed seated','Ever confirmed seated'],rows):'<div class="notice">No MTTs start in this date range.</div>'}<p class="sub">Updated ${esc(date(d.as_of,d.timezone))}</p></div>`;
+}
 pages.overview=async gen=>{
   const chartFormat=()=>state.chartFormat||'RING';
-  const metricsRequest=(params={})=>siteApi('metrics?'+new URLSearchParams({...params,format:chartFormat()})).then(data=>({data}),error=>({error}));
+  const metricsRequest=(params={})=>{const fmt=chartFormat();return siteApi((fmt==='MTT'?'mtts/overview?':'metrics?')+new URLSearchParams({...params,format:fmt})).then(data=>({data}),error=>({error}));};
   const overviewRequest=siteApi('overview');
-  const chartRequest=metricsRequest();
+  const chartRequest=metricsRequest(state.entryDates||{});
+  let panelVersion=0,refreshMtts=async()=>{};
   const d=await overviewRequest;
-  const trend=card('Scheduled vs actually running',`<div class="section-tabs" role="tablist" aria-label="Chart format">${Object.entries(chartFormatLabels).map(([k,label])=>`<button role="tab" data-chart-format="${k}" class="${k===chartFormat()?'active':''}" aria-selected="${k===chartFormat()}">${label}</button>`).join('')}</div><div id="entry-trend-panel"><p class="sub">Loading activity chart…</p></div>`);
+  const trend=card('Scheduled vs actually running',`<div class="section-tabs" role="tablist" aria-label="Activity format">${Object.entries(chartFormatLabels).map(([k,label])=>`<button role="tab" data-chart-format="${k}" class="${k===chartFormat()?'active':''}" aria-selected="${k===chartFormat()}">${label}</button>`).join('')}</div><div id="entry-trend-panel"><p class="sub">Loading activity chart…</p></div>`);
   const offlineMachines=d.machine_summary.offline_machines||[];
   const healthItems=[...offlineMachines.map(m=>`<p>${pill('Offline','red')} <strong>${esc(m.machine)}</strong> — ${m.heartbeat?`Last heartbeat ${esc(date(m.heartbeat))}`:'No heartbeat received yet'}</p>`),...d.machine_summary.warnings.map(w=>`<p>${pill('Warning','orange')} <strong>${esc(w.machine)}</strong> — ${esc(w.message)}</p>`)];
   const machineHealth=healthItems.length?`<div class="health-warnings">${healthItems.join('')}</div>`:`<div class="notice health-ok">All machines online. No sustained CPU, memory or disk warnings.</div>`;
   if(!render(gen,`Your ${esc(state.site.name)} operation at a glance.`,stats([...overviewFormats.map(([fmt,label])=>{const e=formatEntries(d,fmt);return [label,e.value,e.note];}),['Accounts',d.accounts,`${d.synthetic_accounts} simulation-only accounts`],['Machines',`${d.machine_summary.online} / ${d.machines.length}`,`${d.machine_summary.online} online · ${d.machine_summary.offline} offline`],['Hand histories',d.hand_histories.today||0,`${d.hand_histories.last_30_days||0} during the last 30 days`]])+trend+`<div class="grid-2">${card('System health',`<div class="card-body"><h3>${d.machine_summary.online} machines online · ${d.machine_summary.offline} offline</h3>${machineHealth}<a class="button" href="#machines">View machines →</a></div>`)}${card('Weekly operation',`<div class="card-body"><p>${pill(d.schedule.enabled?'Enabled':'Scheduling paused',d.schedule.enabled?'green':'orange')}</p><h3>${Object.values(d.windows||{}).reduce((n,x)=>n+x,0)} recurring windows</h3><p>${overviewFormats.map(([fmt])=>`${chartFormatLabels[fmt]}: ${(d.windows||{})[fmt]||0}`).join(' · ')}</p><p>Timezone: ${esc(d.schedule.timezone)}</p><a class="button" href="#schedule">Edit schedule →</a></div>`)}</div>`))return;
-  let refreshingEntries=false;clearInterval(state.poll);state.poll=setInterval(async()=>{if(refreshingEntries||gen!==state.generation)return;refreshingEntries=true;try{const latest=await siteApi('overview');if(gen===state.generation){const cards=document.querySelectorAll('#workspace .stats .stat');overviewFormats.forEach(([fmt],i)=>{const card=cards[i];if(!card)return;const e=formatEntries(latest,fmt);$('.stat-value',card).textContent=e.value;$('.stat-note',card).textContent=e.note;});}}catch{}finally{refreshingEntries=false;}},15000);
+  let refreshingEntries=false;clearInterval(state.poll);state.poll=setInterval(async()=>{if(refreshingEntries||gen!==state.generation)return;refreshingEntries=true;try{const latest=await siteApi('overview');if(gen===state.generation){const cards=document.querySelectorAll('#workspace .stats .stat');overviewFormats.forEach(([fmt],i)=>{const card=cards[i];if(!card)return;const e=formatEntries(latest,fmt);$('.stat-value',card).textContent=e.value;$('.stat-note',card).textContent=e.note;});await refreshMtts();}}catch{}finally{refreshingEntries=false;}},15000);
   const loadChart=async request=>{
-    const result=await request;if(gen!==state.generation)return;
+    const version=++panelVersion,result=await request;if(gen!==state.generation||version!==panelVersion)return;
     const holder=$('#entry-trend-panel');
-    if(result.error){holder.innerHTML=`<div class="notice">The activity chart could not be loaded. Your summary is still available.</div><button class="button" id="entry-chart-retry">Retry chart</button>`;$('#entry-chart-retry').onclick=()=>{holder.innerHTML='<p class="sub">Loading activity chart?</p>';loadChart(metricsRequest());};return;}
+    if(result.error){holder.innerHTML=`<div class="notice">Activity could not be loaded. Your summary is still available.</div><button class="button" id="entry-chart-retry">Retry</button>`;$('#entry-chart-retry').onclick=()=>{holder.innerHTML='<p class="sub">Loading activity…</p>';loadChart(metricsRequest(state.entryDates||{}));};return;}
     const metrics=result.data;
-    holder.innerHTML=`<form id="entry-chart-filter" class="entry-chart-filter">${field('From','from',metrics.from,'date','required')}${field('To','to',metrics.to,'date','required')}<button class="button primary">Apply dates</button></form><div id="entry-chart">${entryTrendChart(metrics)}</div>`;
-    attachEntryTrendChart($('#entry-chart'),metrics);
-    $('#entry-chart-filter').onsubmit=async e=>{e.preventDefault();const b=$('button',e.target),v=formData(e.target);b.disabled=true;b.textContent='Loading…';try{const result=await siteApi('metrics?'+new URLSearchParams({...v,format:chartFormat()}));if(gen===state.generation)attachEntryTrendChart($('#entry-chart'),result);}catch(err){toast(err.message);}finally{b.disabled=false;b.textContent='Apply dates';}};
+    holder.innerHTML=`<form id="entry-chart-filter" class="entry-chart-filter">${field('From','from',metrics.from,'date','required')}${field('To','to',metrics.to,'date','required')}<button class="button primary">Apply dates</button></form><div id="entry-chart"></div>`;
+    const draw=data=>data.view==='tournaments'?$('#entry-chart').innerHTML=mttOverview(data):attachEntryTrendChart($('#entry-chart'),data);
+    draw(metrics);
+    let dataVersion=0;
+    refreshMtts=async()=>{if(chartFormat()!=='MTT'||!$('#entry-chart-filter')||$('#entry-chart-filter button').disabled)return;const seq=++dataVersion,update=await metricsRequest(formData($('#entry-chart-filter')));if(!update.error&&gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(update.data);};
+    $('#entry-chart-filter').onsubmit=async e=>{e.preventDefault();const b=$('button',e.target),v=formData(e.target),seq=++dataVersion;b.disabled=true;b.textContent='Loading…';try{state.entryDates=v;const result=await metricsRequest(v);if(result.error)throw result.error;if(gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(result.data);}catch(err){toast(err.message);}finally{b.disabled=false;b.textContent='Apply dates';}};
   };
   document.querySelectorAll('[data-chart-format]').forEach(b=>b.onclick=()=>{
     state.chartFormat=b.dataset.chartFormat;
     document.querySelectorAll('[data-chart-format]').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-selected',x===b);});
-    const form=$('#entry-chart-filter'),dates=form?formData(form):{};
+    const form=$('#entry-chart-filter'),dates=form?formData(form):(state.entryDates||{});state.entryDates=dates;
     $('#entry-trend-panel').innerHTML='<p class="sub">Loading activity chart…</p>';loadChart(metricsRequest(dates));
   });
   await loadChart(chartRequest);
