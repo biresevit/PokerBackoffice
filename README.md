@@ -65,7 +65,7 @@ API settings: `BACKOFFICE_SQL_SERVER`, `BACKOFFICE_SQL_DATABASE`, `BACKOFFICE_SQ
 
 Current deployment uses SQL user `poker_backoffice_app` with explicit application-table permissions and no customer-registration write permission. Storage uses a read-only container SAS expiring **2027-01-24**. Run `tools/configure_azure.py` before that date to renew it; credentials remain in memory/Azure settings. `tools/deploy.py` bundles the shared planner and publishes through the official SWA CLI with its deployment token passed only through the process environment. Portable deployment tools are under ignored `artifacts/tooling`.
 
-The eight authorized real accounts are Monica, Richard, Kate, John, Jeremy, Mason, Emma and Andrew. All eight logins were confirmed. Five synthetic accounts remain disabled and never log in. Account additions are idempotent via `tools/add_nenad_accounts.py`.
+Eight authorized real accounts are configured, and all eight logins were confirmed. Five synthetic accounts remain disabled and never log in. Account additions are idempotent via `tools/add_nenad_accounts.py`.
 
 Use the subscription that contains `pokerdb`. Create a dedicated resource group and the Free Static Web App from `infra/main.bicep`. Free is appropriate for this pilot; consider Standard when an SLA is required. No scheduler timer runs inside the managed HTTP API; deploy that independently as an Azure timer Function when its worker integration is ready.
 
@@ -80,7 +80,7 @@ swa deploy frontend --api-location api --api-language python --api-version 3.11 
 ```
 
 6. Verify hosted Microsoft login, unauthorized customer rejection, SQL connectivity and the hand-history replay. SQL firewall rules must allow the selected hosting environment; private-only SQL would require a different hosting/networking plan.
-7. Sign in as the intended **biresevit Microsoft account**, click Request access, then inspect `tools/admin.py requests`. Grant the exact returned subject to Nenad after verifying the identity:
+7. Sign in as the intended **Microsoft account**, click Request access, then inspect `tools/admin.py requests`. Grant the exact returned subject to Nenad after verifying the identity:
 
 ```powershell
 .\.venv\Scripts\python.exe tools/admin.py grant --customer Nenad --subject '<exact-userId>' --email '<display-label>' --apply
@@ -90,7 +90,7 @@ Display name/email alone never grants access. SWA userId is specific to this app
 
 ## Schema and verification
 
-Scheduler migrations 001 through 005 and backoffice migration 001 are applied in Azure SQL. `002_sessions.sql` records account session start/planned-end/actual-end and relates entries to sessions. `003_live_views.sql` adds the configurable lobby interval and short-lived on-demand table diagnostics. `005_hand_player_results.sql` stores idempotent processing state and per-player results. Simo/BluffPoker was not changed. Scheduling and machine assignments remain disabled outside explicitly bounded pilots.
+Scheduler migrations 001 through 005 and backoffice migration 001 are applied in Azure SQL. `002_sessions.sql` records account session start/planned-end/actual-end and relates entries to sessions. `003_live_views.sql` adds the configurable lobby interval and short-lived on-demand table diagnostics. `005_hand_player_results.sql` stores idempotent processing state and per-player results. The other customer's site was not changed. Scheduling and machine assignments remain disabled outside explicitly bounded pilots.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -112,7 +112,7 @@ Existing pre-Nenad hand histories retain their original customer ownership and a
 
 The Chat page lists conversations and currently seated bots for the selected customer/site. Operators can send an explicit message as a selected bot; viewers can read. Incoming messages from known bot accounts are distinguished from human messages. Unread counts are per signed-in user and conversation, with in-app alerts on every page and optional desktop notifications enabled by the user.
 
-The local PokerController worker implements the Evenbet Chat protocol used in hopperv2. Update both PokerController and ScheduleController, then restart the worker through its seat-preserving recovery flow. A chat heartbeat enables the composer only when that worker is connected. The queue pins each request to the selected entry and worker epoch; duplicate request IDs do not send twice. A send is confirmed by its chat echo. Interrupted or unconfirmed sends are never automatically retried. History does not generate new-message notifications.
+The local PokerController worker implements the poker site's chat protocol used in hopperv2. Update both PokerController and ScheduleController, then restart the worker through its seat-preserving recovery flow. A chat heartbeat enables the composer only when that worker is connected. The queue pins each request to the selected entry and worker epoch; duplicate request IDs do not send twice. A send is confirmed by its chat echo. Interrupted or unconfirmed sends are never automatically retried. History does not generate new-message notifications.
 
 Schema: ScheduleController migration `011_table_chat.sql`. No chat text is automatically generated or sent by the scheduler.
 
