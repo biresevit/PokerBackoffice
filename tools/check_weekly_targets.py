@@ -80,9 +80,10 @@ with sync_playwright() as p:
  page.wait_for_function("!document.querySelector('#dialog').open")
  assert len(writes)==1 and len(writes[-1]['windows'])==len(windows)
  assert [w for w in writes[-1]['windows'] if w['weekday']==2]==[dict(windows[4],target=12)]
- page.locator('[data-window="8"]').dblclick()
- page.get_by_role('button',name='Remove window',exact=True).click()
- page.wait_for_function("!document.querySelector('#dialog').open")
+ page.locator('[data-window="8"]').click()
+ page.get_by_role('button',name='Remove',exact=True).click()
+ page.wait_for_function("document.querySelectorAll('[data-window]').length===8")
+ assert page.get_by_role('button',name='Remove',exact=True).is_disabled()
  assert len(writes)==2 and len(writes[-1]['windows'])==len(windows)-1
  page.get_by_role('button',name='+ Add window',exact=True).click()
  page.get_by_role('button',name='Clear',exact=True).click()

@@ -1,5 +1,5 @@
 import {liveDisplaySnapshot,formatLiveAmount} from './live-amounts.js?v=20261103.nativechips1';
-import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261116.schedule-edit';
+import {weeklyTargetChart,bindWeeklyTargetChart} from './weekly-targets.js?v=20261116.schedule-remove';
 import {ManualControls} from './manual-controls.js?v=20261103.tmanual1';
 import {installLivePanel} from './live-panel.js?v=20261111.bluffchat1';
 import {installDistributions} from './distributions-ui.js?v=20261112.accounts1';
@@ -230,7 +230,7 @@ pages.schedule=async gen=>{
  const timeInput=(name,value,start=false)=>`<input class="schedule-time" name="${name}" value="${value}" inputmode="numeric" placeholder="HH:MM" pattern="${start?'(?:[01][0-9]|2[0-3]):[0-5][0-9]':'(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)'}" required>`;
  const draw=()=>{
   $('#week').innerHTML=weeklyTargetChart(windows,days,d.timezone);
-  bindWeeklyTargetChart($('#week'),windows,days,index=>openWindow(index));
+  bindWeeklyTargetChart($('#week'),windows,days,index=>openWindow(index),async index=>{if(state.customer.role!=='operator')return;try{await persist(windows.filter((_,i)=>i!==index),'Schedule window removed');}catch(error){toast(error.message,true);}});
   capacityNote(windows);
  };
  draw();
