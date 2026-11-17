@@ -15,6 +15,7 @@ def test_overview_counts_unique_bots_and_keeps_original_registration_after_retur
         def rows(self,sql,*args):
             for table in ('scheduler.LobbyTable','backoffice.EntryPresence','scheduler.Command','scheduler.MttPlan'):
                 sql=sql.replace(table,'#'+table.split('.')[1])
+            sql=sql.replace('scheduler.Entry','#EntryPresence')
             return base.rows(sql,*args)
     try:
         for sql in [
@@ -38,9 +39,17 @@ def test_overview_counts_unique_bots_and_keeps_original_registration_after_retur
                 (4,'join','failed','registration_failed','{}'),
                 (7,'join','succeeded','registration_gone','{"resume_registration":true}')""",
         ]:base.execute(sql)
+        base.execute('ALTER TABLE #LobbyTable ADD TournamentInfo nvarchar(max) NULL,ObservedUtc datetime2 NULL')
+        base.execute('ALTER TABLE #EntryPresence ADD CreatedUtc datetime2 NULL,ClosedUtc datetime2 NULL')
+        base.execute('ALTER TABLE #MttPlan ADD RebuyBots int NOT NULL DEFAULT 0,AddonBots int NOT NULL DEFAULT 0,EarlyPercent int NOT NULL DEFAULT 40,EarlyHours float NOT NULL DEFAULT 2')
         store=SimpleNamespace(db=Fixtures(),ctx=None,site=lambda sid:dict(timezone='Europe/Rome'))
         result=Mtts(store).overview(1006,{'from':'2026-11-16','to':'2026-11-16'})
         assert len(result['items'])==1
         assert result['totals']==dict(scheduled=10,registered=4,running=1,ever_seated=3)
+        base.execute("INSERT #LobbyTable(SiteId,TableId,TableName,GameType,StartUtc,TournamentState,TableType) VALUES(1006,'T3','Future ticket','NLH','2030-01-01','registering','MTT')")
+        base.execute("INSERT #EntryPresence(EntryId,SiteId,TableId,BotAccountId,Status,LastConfirmedUtc,IsOpen,IsLiveOwner,CreatedUtc) VALUES(8,1006,'T3',7,'joining','2026-11-16T20:00:00',1,0,'2026-11-16T20:00:00')")
+        result=Mtts(store).overview(1006,{'from':'2026-11-16','to':'2026-11-16'})
+        assert [i['name'] for i in result['items']]==['Turbo Night','Future ticket']
+        assert result['totals']==dict(scheduled=10,registered=5,running=1,ever_seated=3)
     finally:
         conn.rollback();conn.close()

@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backoffice.mtts import Mtts, planned_target
+from backoffice.mtts import Mtts, planned_target,overview_range
+from zoneinfo import ZoneInfo
 from backoffice.store import Context, Store
 from backoffice.validation import Error
 
@@ -96,12 +97,13 @@ def test_overview_keeps_completed_and_unplanned_tournaments_and_separates_live_f
         def rows(self,sql,*args):
             if 'FROM scheduler.LobbyTable l' in sql:
                 self.bounds=args
-                return [dict(lobby('Turbo Night',NOW,state='completed'),registered=23,running=0,ever_seated=16),
-                        dict(lobby('No plan',NOW,table='T2'),registered=0,running=0,ever_seated=0)]
+                when=datetime(2026,11,16,21,30,tzinfo=timezone.utc)
+                return [dict(lobby('Turbo Night',when,state='completed'),registered=23,running=0,ever_seated=16),
+                        dict(lobby('No plan',when,table='T2'),first_entry=when,registered=0,running=0,ever_seated=0)]
             return super().rows(sql,*args)
     db=OverviewDb(plans=[plan('Turbo Night',total=23)])
     result=mtts(db).overview(1006,{'from':'2026-11-16','to':'2026-11-16'})
-    assert db.bounds==(1006,datetime(2026,11,15,23),datetime(2026,11,16,23))
+    assert db.bounds==(1006,datetime(2026,11,12,22),datetime(2026,11,20,0),datetime(2026,11,16,23),datetime(2026,11,15,23))
     assert len(result['items'])==2 and result['items'][0]['state']=='completed'
     assert result['items'][0]['scheduled']==23 and result['items'][1]['scheduled'] is None
     assert result['totals']==dict(scheduled=23,registered=23,running=0,ever_seated=16)
@@ -124,5 +126,37 @@ def test_overview_allows_future_dates_and_uses_local_daylight_saving_boundaries(
             return []
     db=OverviewDb()
     result=mtts(db).overview(1006,{'from':'2030-03-31','to':'2030-03-31'})
-    assert db.bounds==(1006,datetime(2030,3,30,23),datetime(2030,3,31,22))
+    start,stop,hours=overview_range({'from':'2030-03-31','to':'2030-03-31'},ZoneInfo('Europe/Rome'),NOW)
+    assert start==datetime(2030,3,30,23,tzinfo=timezone.utc) and stop==datetime(2030,3,31,22,tzinfo=timezone.utc)
     assert result['items']==[] and all(n==0 for n in result['totals'].values())
+
+
+@pytest.mark.parametrize('hours',[1,3,6,12,24])
+def test_relative_ranges_slide_from_now(hours):
+    start,stop,selected=overview_range({'hours':str(hours)},ZoneInfo('Europe/Rome'),NOW)
+    assert (start,stop,selected)==(NOW-timedelta(hours=hours),NOW,hours)
+
+
+def test_custom_range_honors_time_and_rejects_nonexistent_daylight_saving_time():
+    start,stop,hours=overview_range({'from':'2026-11-16T20:15','to':'2026-11-16T21:45'},ZoneInfo('Europe/Rome'),NOW)
+    assert start==datetime(2026,11,16,19,15,tzinfo=timezone.utc)
+    assert stop==datetime(2026,11,16,20,45,tzinfo=timezone.utc) and hours is None
+    with pytest.raises(Error):overview_range({'from':'2030-03-31T02:30','to':'2030-03-31T04:00'},ZoneInfo('Europe/Rome'),NOW)
+
+
+def test_overview_hides_unopened_registration_windows_but_includes_future_starts_and_ongoing_play():
+    class OverviewDb(Db):
+        def rows(self,sql,*args):
+            if 'FROM scheduler.LobbyTable l' in sql:
+                return [dict(lobby(name,start,state=state,table=str(i),observed=start+timedelta(hours=1) if state=='completed' else NOW),registered=0,running=0,ever_seated=0)
+                        for i,(name,start,state) in enumerate([
+                            ('Open soon start',NOW+timedelta(hours=1),'registering'),
+                            ('Not open',NOW+timedelta(days=1),'registering'),
+                            ('Still running',NOW-timedelta(hours=5),'running'),
+                            ('Old complete',NOW-timedelta(days=2),'completed'),
+                            ('Unplanned',NOW+timedelta(hours=1),'registering')])]
+            return super().rows(sql,*args)
+    db=OverviewDb(plans=[plan(n) for n in ('Open soon start','Not open','Still running','Old complete')])
+    result=mtts(db).overview(1006,{'hours':'1'})
+    assert [i['name'] for i in result['items']]==['Open soon start','Still running']
+    assert result['totals']['scheduled']==20

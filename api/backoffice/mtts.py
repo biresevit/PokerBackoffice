@@ -27,6 +27,27 @@ def plan_json(row):
                                      "updated": row["UpdatedUtc"]}
 
 
+def overview_range(query,zone,now):
+    hours=query.get('hours')
+    if hours is not None or not (query.get('from') or query.get('to')):
+        hours=integer(24 if hours is None else hours,1,2208,'Hours')
+        return now-timedelta(hours=hours),now,hours
+    try:
+        def parse(value,end=False):
+            parsed=datetime.fromisoformat(value)
+            if len(value)==10 and end:parsed+=timedelta(days=1)
+            if parsed.tzinfo is None:
+                local=parsed.replace(tzinfo=zone)
+                if local.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)!=parsed:raise ValueError()
+                parsed=local
+            return parsed.astimezone(timezone.utc)
+        start=parse(query['from']);stop=parse(query['to'],True)
+    except (ValueError,TypeError,KeyError):raise Error(400,'From and To must be valid local dates and times')
+    if stop<=start:raise Error(400,'To must be after From')
+    if stop-start>timedelta(days=92):raise Error(400,'MTT overview range cannot exceed 92 days')
+    return start,stop,None
+
+
 class Mtts:
     def __init__(self, store):
         self.store, self.db, self.ctx = store, store.db, store.ctx
@@ -34,16 +55,12 @@ class Mtts:
     def overview(self, site_id, query):
         site=self.store.site(site_id)
         zone=ZoneInfo(site['timezone']);now=datetime.now(timezone.utc)
-        try:
-            first=datetime.strptime(query.get('from') or now.astimezone(zone).date().isoformat(),'%Y-%m-%d').date()
-            last=datetime.strptime(query.get('to') or now.astimezone(zone).date().isoformat(),'%Y-%m-%d').date()
-        except (ValueError,TypeError):
-            raise Error(400,'From and To must be valid dates')
-        if last<first:raise Error(400,'To date must not be before From date')
-        if (last-first).days>=92:raise Error(400,'MTT overview range cannot exceed 92 days')
-        start=datetime.combine(first,datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
-        stop=datetime.combine(last+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc).replace(tzinfo=None)
-        rows=self.db.rows("""SELECT l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState,
+        start,stop,hours=overview_range(query,zone,now)
+        # Include future starts whose early registration has begun, and older
+        # tournaments still being played during the selected window.
+        rows=self.db.rows("""SELECT l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState,l.TournamentInfo,l.ObservedUtc,
+                MIN(e.CreatedUtc) AS first_entry,
+                MAX(CASE WHEN e.IsOpen=1 AND e.IsLiveOwner=1 AND e.SeatedUtc IS NOT NULL THEN e.LastConfirmedUtc END) AS last_activity,
                 COUNT(DISTINCT CASE WHEN registration.Confirmed=1 OR e.SeatedUtc IS NOT NULL
                     OR (e.Status<>'failed' AND e.LastConfirmedUtc IS NOT NULL)
                     THEN e.BotAccountId END) AS registered,
@@ -55,15 +72,34 @@ class Mtts:
             OUTER APPLY (SELECT TOP(1) 1 AS Confirmed FROM scheduler.Command c
                 WHERE c.EntryId=e.EntryId AND c.Kind='join' AND c.Status='succeeded' AND c.ResultCode IS NULL
                   AND JSON_VALUE(c.PayloadJson,'$.resume_registration') IS NULL) registration
-            WHERE l.SiteId=%s AND l.TableType='MTT' AND l.StartUtc>=%s AND l.StartUtc<%s
-            GROUP BY l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState
-            ORDER BY l.StartUtc,l.TableName,l.TableId""",site_id,start,stop)
-        plans={r['SeriesName']:r['TotalBots'] for r in self.db.rows(
-            'SELECT SeriesName,TotalBots FROM scheduler.MttPlan WHERE SiteId=%s',site_id)}
-        items=[dict(id=r['TableId'],name=r['TableName'],game=r['GameType'],start=utc(r['StartUtc']),
-                    state=r['TournamentState'],scheduled=plans.get(series_name(r['TableName'])),
-                    registered=r['registered'],running=r['running'],ever_seated=r['ever_seated']) for r in rows]
-        return dict(format='MTT',view='tournaments',timezone=site['timezone'],**{'from':first.isoformat(),'to':last.isoformat()},
+            WHERE l.SiteId=%s AND l.TableType='MTT' AND ((l.StartUtc>=%s AND l.StartUtc<%s)
+                OR EXISTS(SELECT 1 FROM scheduler.Entry existing
+                    WHERE existing.SiteId=l.SiteId AND existing.TableId=l.TableId AND existing.CreatedUtc<%s
+                      AND (existing.IsOpen=1 OR existing.ClosedUtc>=%s)))
+            GROUP BY l.TableId,l.TableName,l.GameType,l.StartUtc,l.TournamentState,l.TournamentInfo,l.ObservedUtc
+            ORDER BY l.StartUtc,l.TableName,l.TableId""",site_id,(start-timedelta(hours=73)).replace(tzinfo=None),
+                    (min(stop,now)+timedelta(hours=73)).replace(tzinfo=None),stop.replace(tzinfo=None),start.replace(tzinfo=None))
+        plans={r['SeriesName']:r for r in self.db.rows('SELECT * FROM scheduler.MttPlan WHERE SiteId=%s',site_id)}
+        items=[]
+        for r in rows:
+            plan=plans.get(series_name(r['TableName']));when=utc(r['StartUtc'])
+            opened=utc(r.get('first_entry'));end=when
+            if plan and plan['TotalBots']:
+                p=MttPlan(plan['TotalBots'],plan['RebuyBots'],plan['AddonBots'],plan['EarlyPercent'],float(plan['EarlyHours']))
+                first,last=registration_window(p,when,parse_info(r['TournamentInfo']))
+                opened=min(opened,first) if opened else first
+                end=max(end,last)
+            if opened is None or opened>now or opened>=stop:continue
+            for activity in (r.get('last_activity') if r['TournamentState']=='running' else None,
+                             r.get('ObservedUtc') if r['TournamentState'] in ('running','completed') else None):
+                if activity:end=max(end,utc(activity))
+            if end<start:continue
+            items.append(dict(id=r['TableId'],name=r['TableName'],game=r['GameType'],start=when,registration_start=opened,
+                    state=r['TournamentState'],scheduled=plan['TotalBots'] if plan else None,
+                    registered=r['registered'],running=r['running'],ever_seated=r['ever_seated']))
+        return dict(format='MTT',view='tournaments',timezone=site['timezone'],hours=hours,
+                    **{'from':start.astimezone(zone).isoformat(timespec='minutes')[:16],
+                       'to':stop.astimezone(zone).isoformat(timespec='minutes')[:16]},
                     as_of=now,items=items,totals={key:sum(i[key] or 0 for i in items)
                     for key in ('scheduled','registered','running','ever_seated')})
 

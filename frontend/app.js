@@ -173,14 +173,14 @@ const chartFormatLabels={RING:'Ring',SNG:'SNG',MTT:'MTT'};
 function mttOverview(d){
  const counts=[['scheduled','Scheduled'],['registered','Registered'],['running','Running · confirmed seated'],['ever_seated','Ever confirmed seated']];
  const summary=`<div class="mtt-overview-summary">${counts.map(([key,label])=>`<div><span>${label}</span><strong>${d.totals[key]}</strong></div>`).join('')}</div>`;
- const rows=d.items.map(i=>`<tr><td class="nowrap">${esc(date(i.start,d.timezone))}</td><td><strong>${esc(i.name)}</strong><span class="sub">${esc(i.game||'')}</span></td><td>${pill(i.state==='running'?'Running':i.state==='registering'?'Registering':i.state==='completed'?'Completed':i.state||'Unknown',i.state==='running'?'green':'gray')}</td><td class="number">${i.scheduled??'—'}</td><td class="number ${i.scheduled!=null&&i.registered<i.scheduled?'mtt-shortfall':''}">${i.registered}</td><td class="number">${i.running}</td><td class="number ${i.ever_seated<i.registered?'mtt-shortfall':''}">${i.ever_seated}</td></tr>`);
- return `<div class="mtt-overview">${summary}<p class="sub">Tournaments starting in the selected dates · ${esc(d.timezone)}. Unique bots per tournament; running shows bots seated now, and ever seated includes eliminated bots. Scheduled reflects the current plan.</p>${rows.length?table(['Start','Tournament','Status','Scheduled','Registered','Running · confirmed seated','Ever confirmed seated'],rows):'<div class="notice">No MTTs start in this date range.</div>'}<p class="sub">Updated ${esc(date(d.as_of,d.timezone))}</p></div>`;
+ const rows=d.items.map(i=>`<tr><td class="nowrap" title="Bot registration begins ${esc(date(i.registration_start,d.timezone))}">${esc(date(i.start,d.timezone))}</td><td><strong>${esc(i.name)}</strong><span class="sub">${esc(i.game||'')}</span></td><td>${pill(i.state==='running'?'Running':i.state==='registering'?'Registering':i.state==='completed'?'Completed':i.state||'Unknown',i.state==='running'?'green':'gray')}</td><td class="number">${i.scheduled??'—'}</td><td class="number ${i.scheduled!=null&&i.registered<i.scheduled?'mtt-shortfall':''}">${i.registered}</td><td class="number">${i.running}</td><td class="number ${i.ever_seated<i.registered?'mtt-shortfall':''}">${i.ever_seated}</td></tr>`);
+ return `<div class="mtt-overview">${summary}<p class="sub">Only MTTs whose bot registration window has begun; registration or play overlaps the selected time range · ${esc(d.timezone)}. Unique bots per tournament; running shows bots seated now, and ever seated includes eliminated bots. Scheduled reflects the current plan.</p>${rows.length?table(['Start','Tournament','Status','Scheduled','Registered','Running · confirmed seated','Ever confirmed seated'],rows):'<div class="notice">No MTTs with registration started are active in this time range.</div>'}<p class="sub">Updated ${esc(date(d.as_of,d.timezone))}</p></div>`;
 }
 pages.overview=async gen=>{
   const chartFormat=()=>state.chartFormat||'RING';
-  const metricsRequest=(params={})=>{const fmt=chartFormat();return siteApi((fmt==='MTT'?'mtts/overview?':'metrics?')+new URLSearchParams({...params,format:fmt})).then(data=>({data}),error=>({error}));};
+  const metricsRequest=params=>{const fmt=chartFormat(),range=params||(fmt==='MTT'?(state.mttRange||{hours:24}):(state.entryDates||{}));return siteApi((fmt==='MTT'?'mtts/overview?':'metrics?')+new URLSearchParams({...range,format:fmt})).then(data=>({data}),error=>({error}));};
   const overviewRequest=siteApi('overview');
-  const chartRequest=metricsRequest(state.entryDates||{});
+  const chartRequest=metricsRequest();
   let panelVersion=0,refreshMtts=async()=>{};
   const d=await overviewRequest;
   const trend=card('Scheduled vs actually running',`<div class="section-tabs" role="tablist" aria-label="Activity format">${Object.entries(chartFormatLabels).map(([k,label])=>`<button role="tab" data-chart-format="${k}" class="${k===chartFormat()?'active':''}" aria-selected="${k===chartFormat()}">${label}</button>`).join('')}</div><div id="entry-trend-panel"><p class="sub">Loading activity chart…</p></div>`);
@@ -192,20 +192,32 @@ pages.overview=async gen=>{
   const loadChart=async request=>{
     const version=++panelVersion,result=await request;if(gen!==state.generation||version!==panelVersion)return;
     const holder=$('#entry-trend-panel');
-    if(result.error){holder.innerHTML=`<div class="notice">Activity could not be loaded. Your summary is still available.</div><button class="button" id="entry-chart-retry">Retry</button>`;$('#entry-chart-retry').onclick=()=>{holder.innerHTML='<p class="sub">Loading activity…</p>';loadChart(metricsRequest(state.entryDates||{}));};return;}
+    if(result.error){holder.innerHTML=`<div class="notice">Activity could not be loaded. Your summary is still available.</div><button class="button" id="entry-chart-retry">Retry</button>`;$('#entry-chart-retry').onclick=()=>{holder.innerHTML='<p class="sub">Loading activity…</p>';loadChart(metricsRequest());};return;}
     const metrics=result.data;
-    holder.innerHTML=`<form id="entry-chart-filter" class="entry-chart-filter">${field('From','from',metrics.from,'date','required')}${field('To','to',metrics.to,'date','required')}<button class="button primary">Apply dates</button></form><div id="entry-chart"></div>`;
-    const draw=data=>data.view==='tournaments'?$('#entry-chart').innerHTML=mttOverview(data):attachEntryTrendChart($('#entry-chart'),data);
+    const isMtt=metrics.view==='tournaments';
+    if(isMtt)state.mttRange=metrics.hours?{hours:metrics.hours}:{from:metrics.from,to:metrics.to};
+    const quick=isMtt?`<div class="mtt-range-presets" aria-label="MTT time range">${[1,3,6,12,24].map(h=>`<button type="button" class="button small ${Number(metrics.hours)===h?'active':''}" data-mtt-hours="${h}" aria-pressed="${Number(metrics.hours)===h}">Last ${h}h</button>`).join('')}<button type="button" class="button small ${metrics.hours?'':'active'}" data-mtt-custom aria-pressed="${!metrics.hours}">Custom</button></div>`:'';
+    holder.innerHTML=`<form id="entry-chart-filter" class="entry-chart-filter ${isMtt?'mtt-range-filter':''}">${quick}${field('From','from',metrics.from,isMtt?'datetime-local':'date','required')}${field('To','to',metrics.to,isMtt?'datetime-local':'date','required')}<button type="submit" class="button primary">${isMtt?'Apply range':'Apply dates'}</button></form><div id="entry-chart"></div>`;
+    const form=$('#entry-chart-filter'),apply=$('[type=submit]',form);
+    const custom=enabled=>{if(!isMtt)return;form.querySelectorAll('input').forEach(input=>input.disabled=!enabled);apply.hidden=!enabled;};
+    custom(!metrics.hours);
+    const draw=data=>{if(data.view==='tournaments'){
+      $('#entry-chart').innerHTML=mttOverview(data);
+      if(form.querySelector('[data-mtt-hours].active')){form.elements.from.value=data.from;form.elements.to.value=data.to;}
+    }else attachEntryTrendChart($('#entry-chart'),data);};
     draw(metrics);
     let dataVersion=0;
-    refreshMtts=async()=>{if(chartFormat()!=='MTT'||!$('#entry-chart-filter')||$('#entry-chart-filter button').disabled)return;const seq=++dataVersion,update=await metricsRequest(formData($('#entry-chart-filter')));if(!update.error&&gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(update.data);};
-    $('#entry-chart-filter').onsubmit=async e=>{e.preventDefault();const b=$('button',e.target),v=formData(e.target),seq=++dataVersion;b.disabled=true;b.textContent='Loading…';try{state.entryDates=v;const result=await metricsRequest(v);if(result.error)throw result.error;if(gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(result.data);}catch(err){toast(err.message);}finally{b.disabled=false;b.textContent='Apply dates';}};
+    refreshMtts=async()=>{if(chartFormat()!=='MTT'||!$('#entry-chart-filter')||apply.disabled)return;const seq=++dataVersion,update=await metricsRequest(state.mttRange);if(!update.error&&gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(update.data);};
+    form.onsubmit=async e=>{e.preventDefault();const v=formData(form),seq=++dataVersion;apply.disabled=true;apply.textContent='Loading...';try{if(isMtt)state.mttRange=v;else state.entryDates=v;const result=await metricsRequest(v);if(result.error)throw result.error;if(gen===state.generation&&version===panelVersion&&seq===dataVersion)draw(result.data);}catch(err){toast(err.message);}finally{apply.disabled=false;apply.textContent=isMtt?'Apply range':'Apply dates';}};
+    form.querySelectorAll('[data-mtt-hours]').forEach(button=>button.onclick=()=>{state.mttRange={hours:Number(button.dataset.mttHours)};loadChart(metricsRequest(state.mttRange));});
+    const customButton=form.querySelector('[data-mtt-custom]');
+    if(customButton)customButton.onclick=()=>{custom(true);form.querySelectorAll('.mtt-range-presets button').forEach(button=>{button.classList.toggle('active',button===customButton);button.setAttribute('aria-pressed',button===customButton);});};
   };
   document.querySelectorAll('[data-chart-format]').forEach(b=>b.onclick=()=>{
+    const form=$('#entry-chart-filter');if(form&&chartFormat()!=='MTT')state.entryDates=formData(form);
     state.chartFormat=b.dataset.chartFormat;
     document.querySelectorAll('[data-chart-format]').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-selected',x===b);});
-    const form=$('#entry-chart-filter'),dates=form?formData(form):(state.entryDates||{});state.entryDates=dates;
-    $('#entry-trend-panel').innerHTML='<p class="sub">Loading activity chart…</p>';loadChart(metricsRequest(dates));
+    $('#entry-trend-panel').innerHTML='<p class="sub">Loading activity...</p>';loadChart(metricsRequest());
   });
   await loadChart(chartRequest);
 };

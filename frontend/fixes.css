@@ -254,3 +254,11 @@ tr.selected td{background:#f3f8ee}
 .mtt-overview .mtt-shortfall{color:#986518;font-weight:600}
 .mtt-overview .nowrap{white-space:nowrap}
 @media(max-width:700px){.mtt-overview{padding:16px}.mtt-overview-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.mtt-range-filter .mtt-range-presets{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap}
+.mtt-range-presets .button.active{background:#2c5e47;color:#fff;border-color:#2c5e47}
+.mtt-range-filter [hidden]{display:none}
+.mtt-range-filter input:disabled{opacity:.7;background:#f6f8f3}
+.entry-chart-filter.mtt-range-filter{flex-wrap:wrap}
+.mtt-range-filter .field{flex:0 1 260px;min-width:240px}
+.mtt-range-presets .button{width:auto}
+@media(max-width:700px){.mtt-range-filter .field{flex:0 1 auto;min-width:0}.mtt-range-filter .mtt-range-presets{flex-basis:auto}}
