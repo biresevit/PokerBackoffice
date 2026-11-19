@@ -117,7 +117,11 @@ client maps BalancesUpdate `cashInfoList[].mt` to money type and `.ma` to the
 integer wallet amount; those allowlisted values are saved in `WalletsJson`, keeping
 different money types separate. Bonus money is excluded. The monetary-field
 mapping is verified against the [vendor client](https://demo.evenbetpoker.com/),
-but money-type-to-fiat mapping remains unverified: do not sum money types or compare
+including the vendor DTO's zero defaults when the server omits a zero amount.
+The live wire format was checked on a canary PC without logging monetary values
+or account identities. The first sample waits 15 seconds after login for lease
+adoption during restart reconciliation.
+Money-type-to-fiat mapping remains unverified: do not sum money types or compare
 them with fiat buy-ins without that conversion. An unrecognized response records
 `balance_shape_unverified`. Failed/expired reads
 remain unknown or retain clearly labelled older evidence. Accounts accumulate
