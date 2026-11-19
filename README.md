@@ -11,6 +11,7 @@ A customer-scoped web dashboard for a distributed poker automation platform, cov
 - Static HTML/JavaScript frontend and a Python API hosted by Azure Static Web Apps.
 - Explicit identity membership, viewer/operator roles, and customer-scoped Azure SQL queries.
 - Interactive reporting, replay, live diagnostics, and signed rolling updates.
+- Local LangGraph/LangChain diagnosis page with private request history and read-only operational tools for EvenBet and BluffPoker. See [local setup and current limitations](docs/diagnostics.md).
 
 **Technology:** HTML, CSS, JavaScript, Python, Azure Static Web Apps, Azure SQL, Blob Storage.
 

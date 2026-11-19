@@ -134,13 +134,16 @@ def handle(request: Request, session_factory=session, *, local_context: Context 
             store = Store(db, Context(cid, user["identityProvider"], user["userId"], membership["role"]))
             if path == "sites" and request.method == "GET":
                 return response({"items": store.sites()})
-            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings|mtts|monitoring)(?:/(.*))?", path)
+            match = re.fullmatch(r"sites/(\d+)/(overview|metrics|accounts|schedule|stakes|tables|machines|tasks|sessions|histories|chat|updates|settings|mtts|monitoring|diagnostics)(?:/(.*))?", path)
             if not match:
                 raise Error(404, "Endpoint not found")
             sid, section, tail = int(match[1]), match[2], match[3]
             # Scope checked before any resource-specific query (including downloads).
             store.site(sid)
             method = request.method
+            if section == 'diagnostics':
+                from .diagnostics import dispatch
+                return response(dispatch(store, sid, method, tail, body), 202 if method == 'POST' else 200)
             logs=re.fullmatch(r'(\d+)/logs(?:/([0-9a-fA-F-]+)/download)?',tail or '') if section=='machines' else None
             if logs:
                 from .machine_logs import MachineLogs

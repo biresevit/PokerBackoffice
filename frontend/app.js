@@ -10,6 +10,7 @@ import {installUpdates} from './updates-ui.js?v=20261108.machines';
 import {installChat} from './chat-ui.js?v=20261111.bluffchat1';
 import {installCasinoSettings} from './casino-settings.js?v=20261111.solver1';
 import {installMachineLogs} from './machine-logs.js?v=20261104.logs1';
+import {installDiagnostics} from './diagnostics-ui.js?v=20261119.1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const names = {overview:'Overview', accounts:'Accounts', schedule:'Weekly schedule', tables:'Live tables', chat:'Chat', tasks:'Tasks', sessions:'Sessions', stakes:'Stakes', machines:'Machines', monitoring:'Monitoring', updates:'Updates', histories:'Hand histories', winnings:'Winnings'};
@@ -154,6 +155,9 @@ function render(gen,description,body,actions=''){
   $('#workspace').innerHTML=`<div class="page-heading"><div><h1>${names[state.page]}</h1><p>${description}</p></div><div class="actions">${actions}</div></div>${body}`;return true;
 }
 const pages={};
+names.diagnostics='AI diagnosis';symbols.diagnostics='?';
+navGroups.find(g=>g[0]==='Live')[1].push('diagnostics');
+installDiagnostics({$,esc,state,pages,render,siteApi});
 names.settings='Strategy settings';symbols.settings='⚙';
 navGroups.find(g=>g[0]==='Setup')[1].push('settings');
 installCasinoSettings({$,esc,state,pages,render,siteApi,toast,select});

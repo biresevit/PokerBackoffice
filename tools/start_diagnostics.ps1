@@ -1,0 +1,22 @@
+param([ValidateSet('live','recorded')][string]$Mode='live', [int]$CustomerId=14004, [int]$Port=4280)
+$ErrorActionPreference='Stop'
+$projectRoot=Split-Path -Parent $PSScriptRoot
+$pythonPath=Join-Path $projectRoot 'diagnostics/.venv/Scripts/python.exe'
+if(!(Test-Path -LiteralPath $pythonPath)){throw 'Create diagnostics/.venv and install diagnostics/requirements.txt first; see docs/diagnostics.md.'}
+if(!$env:OPENAI_API_KEY){$env:OPENAI_API_KEY=[Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')}
+if($Mode -eq 'live' -and !$env:OPENAI_API_KEY){throw 'Configure OPENAI_API_KEY locally or pass -Mode recorded. Never paste API keys into chat.'}
+$env:POKERFILL_DIAGNOSTICS_MODE=$Mode
+$env:POKERFILL_DIAGNOSTICS_URL='http://127.0.0.1:4310'
+$randomBytes=New-Object byte[] 48
+$rng=[System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($randomBytes)
+$rng.Dispose()
+$env:POKERFILL_DIAGNOSTICS_TOKEN=[Convert]::ToBase64String($randomBytes)
+$worker=Start-Process -FilePath $pythonPath -ArgumentList '-m','uvicorn','diagnostics.service:app','--host','127.0.0.1','--port','4310','--no-access-log' -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+try {
+    Write-Host "AI diagnosis: http://127.0.0.1:$Port/backoffice#diagnostics ($Mode mode). Ctrl+C stops the preview."
+    & $pythonPath (Join-Path $PSScriptRoot 'preview.py') --port $Port --customer-id $CustomerId
+} finally {
+    if(!$worker.HasExited){Stop-Process -Id $worker.Id}
+    Remove-Item Env:POKERFILL_DIAGNOSTICS_TOKEN -ErrorAction SilentlyContinue
+}
