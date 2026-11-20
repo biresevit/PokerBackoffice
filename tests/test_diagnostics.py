@@ -98,7 +98,7 @@ def test_only_selects_and_fixed_scope(name):
     for sql,args in queries:
         assert sql.strip().upper().startswith('SELECT')
         assert "DROP TABLE" not in sql
-        assert 1006 in args or 'OBJECT_ID(' in sql
+        assert 1006 in args or 'OBJECT_ID(' in sql or ('FROM dbo.Customer WHERE CustomerId=%s' in sql and args==(3,))
         assert 'LoginPassword AS' not in sql and 'PayloadJson' not in sql
 
 

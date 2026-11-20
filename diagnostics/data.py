@@ -45,6 +45,7 @@ class Data:
         with self.factory() as db:
             store = Store(db, Context(s.customer_id, s.provider, s.subject, 'viewer'))
             site = store.site(s.site_id)  # Independent tenant check on every tool call.
+            customer = db.one('SELECT CustomerName AS name FROM dbo.Customer WHERE CustomerId=%s',s.customer_id)
             sid = s.site_id
             if name == 'get_schedule_compliance':
                 overview = store.overview(sid)
@@ -71,12 +72,21 @@ class Data:
                     FROM scheduler.Site WHERE SiteId=%s''',sid)}
             elif name == 'get_machine_health':
                 result = db.rows('''SELECT a.MachineId,a.IsReady,a.IsEnabled,a.LastHeartbeatUtc,
-                    a.ControllerVersion,a.MaxEntries,s.HeartbeatTimeoutSeconds,
-                    t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.ActiveEntries
+                    COALESCE(v.PokerControllerVersion,a.ControllerVersion) AS ControllerVersion,a.MaxEntries,s.HeartbeatTimeoutSeconds,
+                    t.SampledUtc,t.CpuPercent,t.MemoryPercent,t.ActiveEntries,
+                    g.CurrentReleaseId,v.Label AS ReleaseLabel,g.AppsHealthy,g.Stage AS UpdaterStage,
+                    g.LastHeartbeatUtc AS AgentHeartbeatUtc,u.CompletedUtc AS LastUpdateCompletedUtc
                     FROM scheduler.MachineAssignment a JOIN scheduler.Site s ON s.SiteId=a.SiteId
+                    JOIN dbo.CustomerMachine m ON m.MachineId=a.MachineId AND m.CustomerId=s.CustomerId
+                    LEFT JOIN scheduler.MachineUpdateAgent g ON g.MachineId=a.MachineId
+                    LEFT JOIN scheduler.UpdateRelease v ON v.ReleaseId=g.CurrentReleaseId
+                    OUTER APPLY(SELECT TOP(1) x.CompletedUtc FROM scheduler.MachineUpdateTask x
+                        JOIN scheduler.UpdateRollout r ON r.RolloutId=x.RolloutId
+                        WHERE x.MachineId=a.MachineId AND r.CustomerId=s.CustomerId AND r.ReleaseId=g.CurrentReleaseId
+                            AND x.Status='completed' ORDER BY x.CompletedUtc DESC) u
                     OUTER APPLY(SELECT TOP(1) SampledUtc,CpuPercent,MemoryPercent,ActiveEntries
                         FROM scheduler.MachineTelemetry t WHERE t.SiteId=a.SiteId AND t.MachineId=a.MachineId
-                        ORDER BY SampledUtc DESC) t WHERE a.SiteId=%s ORDER BY a.MachineId''', sid)
+                        ORDER BY SampledUtc DESC) t WHERE a.SiteId=%s AND m.IsActive=1 ORDER BY a.MachineId''', sid)
             elif name == 'get_lobby_snapshot':
                 result = db.rows('''SELECT TOP(100) TableId,TableName,TableType,GameType,IsOpen,
                     BigBlind,MinBuyIn,MaxBuyIn,CurrencyCode,MaxSeats,OccupiedSeats,ObservedUtc,
@@ -174,7 +184,9 @@ class Data:
                             'EvenBet money types are separate native wallets (cashInfoList mt/ma); do not sum different money types or assume their fiat conversion. An account with multiple wallets appears once in each money-type group.',
                             'CurrencyCode is the site label; EvenBet money-type-to-fiat mapping must be verified before buy-in affordability comparisons.']}
         return {'source': name, 'captured_utc': datetime.now(timezone.utc).isoformat(),
-                'site_id': sid, 'platform': site.get('platform'), 'row_limit': 100,
+                'site_id': sid, 'site_name':site.get('name'), 'customer_id':s.customer_id,
+                'customer_name':customer.get('name') if customer else None,
+                'platform': site.get('platform'), 'row_limit': 100,
                 'coverage': 'Current database state; result sets are bounded and may be truncated at 100 rows.', 'data': result}
 
 
