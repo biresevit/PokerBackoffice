@@ -53,7 +53,7 @@ def test_validation_and_restart(client):
     assert client.post('/investigations',json=dict(scope=scope(),prompt='x',request_id=str(uuid.uuid4()))).status_code==422
     assert client.post('/history',json=scope(secret='not allowed')).status_code==422
     with service.connection() as c:
-        c.execute('INSERT INTO investigations VALUES(?,?,?,?,?,?,NULL,NULL)',('test','owner','{}','question','running',service.datetime.now(service.timezone.utc).isoformat()))
+        c.execute('INSERT INTO investigations(id,owner,scope,prompt,status,created_utc) VALUES(?,?,?,?,?,?)',('test','owner','{}','question','running',service.datetime.now(service.timezone.utc).isoformat()))
     service.init()
     with service.connection() as c:
         assert c.execute("SELECT status FROM investigations WHERE id='test'").fetchone()[0]=='failed'

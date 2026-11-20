@@ -5,6 +5,7 @@ import re
 import urllib.request
 import urllib.error
 from urllib.parse import urlsplit
+from uuid import UUID
 from .validation import Error
 
 
@@ -29,7 +30,16 @@ def dispatch(store, site_id, method, tail, body):
             raise Error(400, 'Enter a question between 3 and 2000 characters')
         if not isinstance(rid, str) or not re.fullmatch(r'[0-9a-fA-F-]{36}', rid):
             raise Error(400, 'A valid request ID is required')
+        try:UUID(rid)
+        except ValueError:raise Error(400,'A valid request ID is required') from None
         path, payload = '/investigations', dict(scope=scope, prompt=prompt.strip(), request_id=rid)
+        parent=body.get('parent_id')
+        if parent is not None:
+            if not isinstance(parent,str) or not re.fullmatch(r'[0-9a-fA-F-]{36}',parent):
+                raise Error(400,'A valid previous request ID is required')
+            try:UUID(parent)
+            except ValueError:raise Error(400,'A valid previous request ID is required') from None
+            payload['parent_id']=parent
     else:
         raise Error(405, 'Method not allowed')
     request = urllib.request.Request(base+path, data=json.dumps(payload).encode(), method='POST',
@@ -38,6 +48,12 @@ def dispatch(store, site_id, method, tail, body):
         with urllib.request.urlopen(request, timeout=8) as response:
             return json.loads(response.read(2_000_000))
     except urllib.error.HTTPError as e:
+        if e.code==409:
+            try:detail=json.loads(e.read(4096)).get('detail')
+            except (ValueError,OSError):detail=None
+            allowed={'Request ID already used','Open the latest answer before asking a follow-up',
+                     'This investigation has reached its question limit; start a new investigation'}
+            raise Error(409,detail if detail in allowed else 'Open the latest answer or start a new investigation') from None
         if e.code in (404,409,429):
             raise Error(e.code, {404:'Diagnosis request not found',409:'Request ID already used',429:'Investigation limit reached; try again later'}[e.code])
         raise Error(503, 'Diagnostic service unavailable') from None

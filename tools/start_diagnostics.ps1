@@ -12,7 +12,9 @@ $rng=[System.Security.Cryptography.RandomNumberGenerator]::Create()
 $rng.GetBytes($randomBytes)
 $rng.Dispose()
 $env:POKERFILL_DIAGNOSTICS_TOKEN=[Convert]::ToBase64String($randomBytes)
-$worker=Start-Process -FilePath $pythonPath -ArgumentList '-m','uvicorn','diagnostics.service:app','--host','127.0.0.1','--port','4310','--no-access-log' -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+$logRoot=Join-Path $projectRoot 'artifacts/diagnostics'
+New-Item -ItemType Directory -Force $logRoot | Out-Null
+$worker=Start-Process -FilePath $pythonPath -ArgumentList '-m','uvicorn','diagnostics.service:app','--host','127.0.0.1','--port','4310','--no-access-log' -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logRoot 'worker.out.log') -RedirectStandardError (Join-Path $logRoot 'worker.err.log') -PassThru
 $extraPreviews=@()
 try {
     $extraPort=$Port

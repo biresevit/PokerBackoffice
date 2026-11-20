@@ -10,7 +10,7 @@ import {installUpdates} from './updates-ui.js?v=20261108.machines';
 import {installChat} from './chat-ui.js?v=20261111.bluffchat1';
 import {installCasinoSettings} from './casino-settings.js?v=20261111.solver1';
 import {installMachineLogs} from './machine-logs.js?v=20261104.logs1';
-import {installDiagnostics} from './diagnostics-ui.js?v=20261119.1';
+import {installDiagnostics} from './diagnostics-ui.js?v=20261120.followups1';
 const $ = (s, root = document) => root.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const names = {overview:'Overview', accounts:'Accounts', schedule:'Weekly schedule', tables:'Live tables', chat:'Chat', tasks:'Tasks', sessions:'Sessions', stakes:'Stakes', machines:'Machines', monitoring:'Monitoring', updates:'Updates', histories:'Hand histories', winnings:'Winnings'};

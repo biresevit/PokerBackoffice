@@ -47,19 +47,27 @@ Compare UTC timestamps and site timezone; stale lobby data cannot prove current 
 Ring seated counts and tournament registration commitments have different semantics.
 Wallet balances are cached observations. Use their timestamps and balance-state groups;
 unknown, stale, failed-read or newer-session caches cannot prove current funding capacity.
+For a follow-up, get_investigation_history contains the earlier dialogue. Resolve
+references such as "that table" or "your previous explanation" using it. Cite that
+tool when explaining what was previously said; prior diagnoses are not proof of
+current conditions. Use fresh tools when asked if something still holds. State
+when only part of a longer conversation is included; never pretend to recall omitted turns.
 Every finding must cite evidence IDs from tools; never invent IDs, balances, events or causes.
 Do not disclose account names, personal data, secrets, or strategy settings. State evidence gaps.
 Investigate the requested period using bounded tools. Do not claim a full historical audit from current state.
 Stay within the question, and produce a concise diagnosis with limitations.'''
 
 
-def investigate(prompt, data, *, mode='live', model=None):
+def investigate(prompt, data, *, mode='live', model=None, history=None, history_total=0):
+    history=history or []
+    history_context={'included_turns':len(history),'previous_turns':history_total,
+                     'request_ids':[t['request_id'] for t in history]}
     evidence, usage = [], {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
     deadline=time.monotonic()+240
-    def bounded(value):
-        if isinstance(value, dict):return {k:bounded(v) for k,v in value.items()}
-        if isinstance(value, list):return [bounded(v) for v in value[:24]]
-        if isinstance(value, str):return value[:400]
+    def bounded(value, text_limit=400):
+        if isinstance(value, dict):return {k:bounded(v,text_limit) for k,v in value.items()}
+        if isinstance(value, list):return [bounded(v,text_limit) for v in value[:24]]
+        if isinstance(value, str):return value[:text_limit]
         return value
 
     def collect(name, hours=24, tournament='', game_format='RING'):
@@ -68,21 +76,31 @@ def investigate(prompt, data, *, mode='live', model=None):
         if len(evidence) >= 12:
             return {'error': 'Tool budget exhausted'}
         try:
-            item = data.read(name, hours, tournament, game_format)
+            if name=='get_investigation_history':
+                item={'source':name,'captured_utc':datetime.now(timezone.utc).isoformat(),
+                      'data':{'turns':history,'included_turns':len(history),'previous_turns':history_total,
+                              'meaning':'Earlier user questions and diagnoses, not current operational proof. Prior evidence sources retain their original capture times. Refresh operational tools to confirm whether earlier conditions still hold.'}}
+                scope=getattr(data,'scope',None)
+                if scope:item.update(site_id=scope.site_id,customer_id=scope.customer_id)
+            else:
+                item = data.read(name, hours, tournament, game_format)
         except Exception:
             # SQL errors may contain connection or schema details; don't give them to the model.
             item = {'source': name, 'captured_utc': datetime.now(timezone.utc).isoformat(),
                     'data': {'available': False, 'reason': 'Diagnostic source unavailable; no conclusion can be drawn.'}}
-        item = bounded(item)
+        text_limit=2000 if name=='get_investigation_history' else 400
+        item = bounded(item,text_limit)
         item['id'] = f'E{len(evidence)+1}'
-        item['limits'] = 'At most 24 items per list; text fields capped at 400 characters. Absence in bounded results is not proof of absence.'
+        item['limits'] = f'At most 24 items per list; text fields capped at {text_limit} characters. Absence in bounded results is not proof of absence.'
         if len(json.dumps(item, default=str)) > 18000:
             item['data'] = {'available':False, 'reason':'Result exceeded the evidence size bound. Narrow the question.'}
         evidence.append(item)
         return item
 
-    # Always establish schedule and health context before interpreting the user request.
-    baseline = [collect(n) for n in ('get_schedule_compliance', 'get_machine_health', 'get_lobby_snapshot')]
+    # Follow-ups start with the dialogue and refresh only the operational tools
+    # needed for that question. New investigations establish a health baseline.
+    baseline = [collect('get_investigation_history')] if history else [collect(n) for n in
+        ('get_schedule_compliance', 'get_machine_health', 'get_lobby_snapshot')]
     if mode == 'recorded':
         # Explicit fixture mode exercises the graph, storage and UI without pretending an LLM ran.
         builder = StateGraph(State)
@@ -92,13 +110,18 @@ def investigate(prompt, data, *, mode='live', model=None):
         report = Report(summary='Recorded-data demonstration: the lobby observation is stale while workers are online.',
                         findings=[Finding(title='Stale lobby evidence', explanation='The recorded scenario has no fresh lobby observations. This can explain why new ring joins are not planned; it does not prove the cause of a live incident.', certainty='probable', evidence_ids=['E2', 'E3'])],
                         limitations=['Recorded fixture only. No live database or model was consulted.', 'Wallet funds and historical login failures are unknown.'])
-        return {'report': report.model_dump(), 'evidence': evidence, 'usage': usage, 'mode': mode}
+        if history:
+            report.summary='Recorded-data follow-up: previous questions and answers were included as conversation context.'
+            report.findings=[Finding(title='Earlier diagnosis context',explanation='This demonstration carries the prior question and answer into the follow-up. It is not a live operational conclusion.',certainty='confirmed',evidence_ids=['E1'])]
+        return {'report': report.model_dump(), 'evidence': evidence, 'usage': usage, 'mode': mode,'history_context':history_context}
     if model is None:
         from langchain_openai import ChatOpenAI
         model = ChatOpenAI(model=os.getenv('POKERFILL_DIAGNOSTICS_MODEL', 'gpt-6.2-sol'),
                            use_responses_api=True, timeout=40, max_retries=1, max_tokens=2500)
     tools = []
-    for name, description in TOOLS.items():
+    tool_specs=dict(TOOLS)
+    if history:tool_specs['get_investigation_history']='Earlier questions and answers in this same private investigation. Use for follow-up references; earlier diagnoses are not fresh operational facts.'
+    for name, description in tool_specs.items():
         def run(hours=24, tournament='', game_format='RING', _name=name):
             return collect(_name, hours, tournament, game_format)
         tools.append(StructuredTool.from_function(run, name=name, description=description, args_schema=Arguments))
@@ -157,4 +180,4 @@ def investigate(prompt, data, *, mode='live', model=None):
     valid = {e['id'] for e in evidence}
     if any(not f.evidence_ids or not set(f.evidence_ids) <= valid for f in report.findings):
         raise RuntimeError('Diagnosis contains unsupported evidence references')
-    return {'report': report.model_dump(), 'evidence': evidence, 'usage': usage, 'mode': mode}
+    return {'report': report.model_dump(), 'evidence': evidence, 'usage': usage, 'mode': mode,'history_context':history_context}

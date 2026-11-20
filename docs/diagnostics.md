@@ -2,8 +2,9 @@
 
 The Backoffice **AI diagnosis** page accepts operational questions for the selected
 EvenBet or BluffPoker site. Requests and answers are private to the authenticated
-provider, user, customer and site. The latest 50 requests are listed; local records
-older than 90 days are removed on service startup. History lives in
+provider, user, customer and site. The latest 50 investigations are listed, grouped
+with their follow-up questions. Investigations inactive for 90 days are removed
+on service startup as complete threads. History lives in
 `artifacts/diagnostics/history.sqlite3`, outside Git. Protect it as customer data.
 
 The agent cannot edit code or settings, register bots, move funds, request log
@@ -59,15 +60,52 @@ diagnostic data. The surrounding existing workspace still reads real customer da
 Live mode fails startup when no API key is configured; it never silently falls back
 to a fixture. Model: `POKERFILL_DIAGNOSTICS_MODEL` (default `gpt-6.2-sol`).
 
+## Follow-up questions
+
+After an answer, the form switches to **Ask follow-up**. Earlier questions and
+answers remain together in the investigation, including after a page reload.
+Open an investigation from **Your requests** to continue it later. Choose
+**New investigation** for an unrelated question with no previous dialogue attached.
+The example-question buttons also start new investigations.
+
+Each follow-up includes the original question/diagnosis and up to three recent
+question/answer exchanges, with a 16,000-character context bound. Long context is
+compacted while preserving the original and most recent exchanges as anchors.
+A label under the answer shows how many earlier
+exchanges were included. The full thread stays readable; a thread can contain
+at most twenty questions. Earlier evidence details are loaded on demand.
+
+The agent sees prior diagnoses as historical conversation, not current proof.
+Follow-ups start with this dialogue and call operational tools when fresh evidence
+is needed. New investigations retain the fixed schedule/health/lobby baseline.
+Each answer has its own evidence references, timestamps and model usage. Follow-ups
+are billable model requests and count toward the existing request limits.
+
+Existing standalone requests become single-question investigations automatically;
+their original answers and raw evidence are preserved. The local SQLite migration
+is additive and does not require a PC update or an Azure SQL migration. A parent
+request must belong to the same user, customer, site and identity provider. Pending
+answers cannot be followed up, and a follow-up must extend the latest answer to
+avoid competing branches.
+
+If a model request fails because OpenAI API credits are exhausted, the failed
+question stays in the thread and earlier answers remain readable. The page shows
+the provider-credit problem explicitly. After restoring API credits, open that
+investigation and retry the question as a follow-up; a failed attempt can be
+continued. Temporary provider throttling is reported separately. Raw provider
+messages, API keys and connection details are not shown.
+
 ## Components and bounds
 
 * `frontend/diagnostics-ui.js`: questions, status polling, escaped answers and history.
 * `api/backoffice/diagnostics.py`: authenticated SWA broker. It checks membership
   and site access before deriving scope; browser-supplied identities are ignored.
 * `diagnostics/service.py`: private FastAPI worker, bounded serial job queue,
-  idempotent request IDs and SQLite history. Interrupted jobs become visibly failed
+  idempotent request IDs and customer/user-scoped SQLite conversation history.
+  `diagnostics/conversations.py` bounds the prior dialogue included with follow-ups.
+  Interrupted jobs become visibly failed
   on restart. One service process only in this local version.
-* `diagnostics/agent.py`: LangGraph baseline → bounded LangChain tool loop →
+* `diagnostics/agent.py`: LangGraph baseline or conversation context → bounded LangChain tool loop →
   structured report → evidence-reference validation. Up to three model/tool rounds,
   twelve evidence calls, bounded output, 60,000 aggregate estimated token reservation
   plus actual-usage checks. Estimates include output allowance, but provider token
@@ -145,7 +183,7 @@ migration and explicitly reports that telemetry is missing.
 
 ```powershell
 diagnostics/.venv/Scripts/python.exe -m pip install pytest httpx
-diagnostics/.venv/Scripts/python.exe -m pytest tests/test_diagnostics.py -q
+diagnostics/.venv/Scripts/python.exe -m pytest tests/test_diagnostics.py tests/test_diagnostic_conversations.py tests/test_diagnostic_log_signals.py -q
 .venv/Scripts/python.exe -m pytest tests -q
 .venv/Scripts/python.exe tools/check_diagnostics_browser.py
 ```
@@ -168,7 +206,9 @@ deploys workers nor installs wallet telemetry.
 
 Browser QA requires the existing Backoffice Playwright environment and local SQL
 access. It starts/stops its own loopback servers, uses a separate test-history
-database, exercises both platform site selections, request/answer/reload history,
+database (default test ports 4380/4410), exercises both platform site selections,
+follow-up context and grouped history, request/answer/reload history,
+loading an older answer's evidence, starting an independent investigation,
 HTML escaping (recorded mode) and mobile layout, and writes screenshots to
 `artifacts/diagnostics/`. Default recorded mode sends no real model requests. Neither mode performs fleet or
 production database writes. Worker tests live in
