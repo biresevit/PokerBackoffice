@@ -257,7 +257,7 @@ only known operational event codes, timestamps, startup exit codes and file cove
 from controller, updater and PDecision logs. Raw lines, hand data, account identities,
 paths, secrets and free-form exception messages are not sent to the model. Worker
 lines explicitly tagged for another site are excluded; untagged machine events have
-unconfirmed site attribution. Shared-PC bundles must match the archive site manifest.
+unconfirmed site attribution. For shared PCs, collection uses the enrolled updater site. Reads independently validate the selected site assignment and customer, then verify the archive against its collection-site manifest. Tagged lines from other sites are excluded.
 UTC events are narrowed to one hour either side of the incident. New collectors record the PC IANA timezone so worker timestamps can be converted to UTC. Ambiguous DST times remain unverified. Without that metadata, unzoned PC timestamps
 are retained from adjacent dates and labelled unverified; their order does not prove
 UTC correlation. Lists are bounded and lifecycle events take priority over generic errors.

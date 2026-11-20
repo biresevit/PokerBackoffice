@@ -64,7 +64,7 @@ def near(stamp, around):
     return abs((value-around).total_seconds())<=3600
 
 
-def summarize(blob, site_id, machine_id, *, around_utc="", topic="all"):
+def summarize(blob, site_id, machine_id, *, around_utc="", topic="all", archive_site_id=None):
     around=datetime.fromisoformat(around_utc.replace("Z","+00:00")) if around_utc else None
     if around is not None and around.tzinfo is None:raise ValueError("Incident time must include timezone")
     if topic not in ("all","restart","authentication","funding","connectivity"):raise ValueError("Invalid log topic")
@@ -77,7 +77,7 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all"):
         info=z.getinfo('manifest.json')
         if info.file_size>128*1024: raise ValueError('Manifest too large')
         manifest=json.loads(z.read(info))
-        if manifest.get('site_id')!=site_id or manifest.get('machine_id')!=machine_id:
+        if manifest.get('site_id')!=(site_id if archive_site_id is None else archive_site_id) or manifest.get('machine_id')!=machine_id:
             raise ValueError('Archive scope mismatch')
         zone=None
         try:
@@ -174,11 +174,12 @@ def read(db, scope, hours, *, machine_id=0, around_utc='', topic='all'):
     rows=[]; inventory=[]
     for machine in machines:
         mid=machine['MachineId']
-        recent=db.rows("""SELECT TOP(4) r.MachineId,r.BlobName,r.SizeBytes,r.CreatedUtc,r.Status,r.ExpiresUtc
+        recent=db.rows("""SELECT TOP(4) r.SiteId,r.MachineId,r.BlobName,r.SizeBytes,r.CreatedUtc,r.Status,r.ExpiresUtc
             FROM backoffice.MachineLogRequest r
-            WHERE r.CustomerId=%s AND r.SiteId=%s AND r.MachineId=%s
+            WHERE r.CustomerId=%s AND r.MachineId=%s
+            AND EXISTS(SELECT 1 FROM scheduler.Site s WHERE s.SiteId=r.SiteId AND s.CustomerId=r.CustomerId)
             AND r.ExpiresUtc>SYSUTCDATETIME() AND r.CreatedUtc>=DATEADD(hour,-%s,SYSUTCDATETIME())
-            ORDER BY r.CreatedUtc DESC""",scope.customer_id,scope.site_id,mid,hours)
+            ORDER BY r.CreatedUtc DESC""",scope.customer_id,mid,hours)
         inventory.append({'machine_id':mid,'collections':[{k:v for k,v in r.items() if k not in ('BlobName','SizeBytes','MachineId','ExpiresUtc')} for r in recent[:2]]})
         ready=next((r for r in recent if r['Status']=='ready'),None)
         if ready:rows.append(ready)
@@ -190,5 +191,5 @@ def read(db, scope, hours, *, machine_id=0, around_utc='', topic='all'):
             if not row['SizeBytes'] or row['SizeBytes']>MAX_BYTES:continue
             blob=client.get_blob_client('machine-diagnostics',row['BlobName'])
             if blob.get_blob_properties().size>MAX_BYTES:continue
-            results.append(summarize(blob.download_blob(max_concurrency=1).readall(),scope.site_id,row['MachineId'],around_utc=around_utc,topic=topic))
+            results.append(summarize(blob.download_blob(max_concurrency=1).readall(),scope.site_id,row['MachineId'],around_utc=around_utc,topic=topic,archive_site_id=row['SiteId']))
     return {'inventory':inventory,'archives':results,'archive_limit':1,'machines_truncated':len(machines)==24,'limitations':['Reads completed unexpired archives; pending collections are listed. Recheck after collection completes. At most one machine archive per call; select machine_id for others. No raw text, paths, hand data or account identities are sent to the model. Machine-wide events cannot prove which site activity was affected.']}

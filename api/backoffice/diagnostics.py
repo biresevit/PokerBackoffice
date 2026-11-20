@@ -17,20 +17,21 @@ def prepare_logs(store, site_id):
     if os.getenv('POKERFILL_DIAGNOSTICS_COLLECT_LOGS')!='1' or store.ctx.role!='operator':
         return {'enabled':False,'reason':'Automatic log collection is disabled or requires operator access.'}
     from .machine_logs import MachineLogs
-    machines=store.db.rows("""SELECT TOP(24) m.MachineId FROM dbo.CustomerMachine m
+    machines=store.db.rows("""SELECT TOP(24) m.MachineId,g.SiteId AS CollectionSiteId FROM dbo.CustomerMachine m
         JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+        JOIN scheduler.MachineUpdateAgent g ON g.MachineId=m.MachineId AND g.Enabled=1
         WHERE m.CustomerId=%s AND a.SiteId=%s AND m.IsActive=1 ORDER BY m.MachineId""",store.ctx.customer_id,site_id)
     service=MachineLogs(store);items=[]
     for machine in machines:
-        mid=machine['MachineId']
+        mid=machine['MachineId'];collection_site=machine['CollectionSiteId']
         recent=store.db.one("""SELECT TOP(1) Status FROM backoffice.MachineLogRequest
             WHERE CustomerId=%s AND SiteId=%s AND MachineId=%s AND ExpiresUtc>SYSUTCDATETIME()
             AND CreatedUtc>DATEADD(minute,-15,SYSUTCDATETIME()) AND Status IN ('ready','queued','collecting','uploading')
-            ORDER BY CreatedUtc DESC""",store.ctx.customer_id,site_id,mid)
+            ORDER BY CreatedUtc DESC""",store.ctx.customer_id,collection_site,mid)
         if recent:
             items.append({'machine_id':mid,'status':recent['Status']});continue
         try:
-            service.create(site_id,mid,{'hours':168})
+            service.create(collection_site,mid,{'hours':168})
             items.append({'machine_id':mid,'status':'requested'})
         except Error:
             items.append({'machine_id':mid,'status':'unavailable'})

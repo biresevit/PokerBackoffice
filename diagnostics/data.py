@@ -48,8 +48,8 @@ class Data:
                 store.site(self.scope.site_id)
                 pending=db.one("""SELECT COUNT(*) AS Count FROM backoffice.MachineLogRequest r
                     JOIN dbo.CustomerMachine m ON m.MachineId=r.MachineId AND m.CustomerId=r.CustomerId
-                    JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId AND a.SiteId=r.SiteId
-                    WHERE r.CustomerId=%s AND r.SiteId=%s AND m.IsActive=1
+                    JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId
+                    WHERE r.CustomerId=%s AND a.SiteId=%s AND m.IsActive=1
                     AND r.Status IN ('queued','collecting','uploading') AND r.ExpiresUtc>SYSUTCDATETIME()""",
                     self.scope.customer_id,self.scope.site_id)
             if not pending or not pending['Count']:return

@@ -104,3 +104,10 @@ def test_continuation_keeps_site_and_timestamp():
     assert [e['code'] for e in result['events']]==['WorkerFenced']
     assert result['events'][0]['timestamp_reported']=='2026-11-19 20:02:30,000'
     assert 'private' not in json.dumps(result)
+
+
+def test_shared_archive_requires_explicit_verified_enrollment_site():
+    with pytest.raises(ValueError):summarize(archive(1),1004,5)
+    result=summarize(archive(1),1004,5,archive_site_id=1)
+    assert result['machine_id']==5
+    with pytest.raises(ValueError):summarize(archive(1),1004,5,archive_site_id=1006)
