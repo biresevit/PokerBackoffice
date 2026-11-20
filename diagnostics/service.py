@@ -125,6 +125,9 @@ async def worker(queue):
         try:
             with connection() as c: c.execute("UPDATE investigations SET status='running' WHERE id=?", (rid,))
             data = RecordedData(inquiry.scope) if MODE == 'recorded' else Data(inquiry.scope)
+            if MODE=='live' and os.getenv('POKERFILL_DIAGNOSTICS_COLLECT_LOGS')=='1':
+                try:await asyncio.to_thread(data.wait_for_logs)
+                except Exception:logging.getLogger(__name__).warning('Log preflight unavailable; continuing database diagnosis')
             with connection() as c:
                 current=c.execute('SELECT root_id,turn_index FROM investigations WHERE id=? AND owner=?',
                                   (rid,inquiry.scope.owner())).fetchone()

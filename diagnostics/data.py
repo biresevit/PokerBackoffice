@@ -38,7 +38,24 @@ class Data:
     def __init__(self, scope, factory=reader):
         self.scope, self.factory = scope, factory
 
-    def read(self, name, hours=24, tournament='', game_format='RING'):
+    def wait_for_logs(self, seconds=45):
+        """Bounded preflight, no model tokens while installed collectors upload."""
+        import time
+        deadline=time.monotonic()+seconds
+        while time.monotonic()<deadline:
+            with self.factory() as db:
+                store=Store(db,Context(self.scope.customer_id,self.scope.provider,self.scope.subject,'viewer'))
+                store.site(self.scope.site_id)
+                pending=db.one("""SELECT COUNT(*) AS Count FROM backoffice.MachineLogRequest r
+                    JOIN dbo.CustomerMachine m ON m.MachineId=r.MachineId AND m.CustomerId=r.CustomerId
+                    JOIN scheduler.MachineAssignment a ON a.MachineId=m.MachineId AND a.SiteId=r.SiteId
+                    WHERE r.CustomerId=%s AND r.SiteId=%s AND m.IsActive=1
+                    AND r.Status IN ('queued','collecting','uploading') AND r.ExpiresUtc>SYSUTCDATETIME()""",
+                    self.scope.customer_id,self.scope.site_id)
+            if not pending or not pending['Count']:return
+            time.sleep(min(3,max(0,deadline-time.monotonic())))
+
+    def read(self, name, hours=24, tournament='', game_format='RING', *, machine_id=0, around_utc='', topic='all'):
         if name not in TOOLS or not 1 <= hours <= 168 or len(tournament) > 200 or game_format not in ('RING','SNG','MTT'):
             raise ValueError('Invalid diagnostic query')
         s = self.scope
@@ -141,7 +158,7 @@ class Data:
                     'limitations': ['EvenBet does not publish all tournament registration metadata. Open entries alone do not prove a seat or successful registration.']}
             elif name == 'get_worker_log_signals':
                 from .log_signals import read
-                result = read(db, s, hours)
+                result = read(db, s, hours, machine_id=machine_id, around_utc=around_utc, topic=topic)
             elif name == 'get_incident_timeline':
                 result = {'commands': db.rows('''SELECT TOP(100) CommandId,MachineId,Kind,Status,ResultCode,
                         CreatedUtc,UpdatedUtc FROM scheduler.Command WHERE SiteId=%s
@@ -149,7 +166,13 @@ class Data:
                     'session_ends': db.rows('''SELECT TOP(100) MachineId,ActualEndUtc,EndReason
                         FROM scheduler.AccountSession WHERE SiteId=%s
                         AND ActualEndUtc>=DATEADD(hour,-%s,SYSUTCDATETIME()) ORDER BY ActualEndUtc DESC''', sid, hours),
-                    'limitations': ['Entry history is reconstructed from retained data, not a continuous observer recording. Use get_worker_log_signals for existing archives.']}
+                    'updates':db.rows('''SELECT TOP(24) t.MachineId,t.Status,t.StartedUtc,t.CompletedUtc,
+                        r.Immediate,v.Label FROM scheduler.UpdateRollout r
+                        JOIN scheduler.MachineUpdateTask t ON t.RolloutId=r.RolloutId
+                        JOIN scheduler.UpdateRelease v ON v.ReleaseId=r.ReleaseId
+                        WHERE r.CustomerId=%s AND r.SiteId=%s
+                        AND t.StartedUtc>=DATEADD(hour,-%s,SYSUTCDATETIME()) ORDER BY t.StartedUtc DESC''',s.customer_id,sid,hours),
+                    'limitations': ['Entry history is reconstructed from retained data, not a continuous observer recording. Use get_worker_log_signals for scoped timestamped logs and coverage. Update records prove rollout timing, not all possible process restart causes.']}
             else:
                 installed = db.one("SELECT OBJECT_ID(N'scheduler.AccountDiagnosticSnapshot') AS object_id")
                 if not installed or not installed.get('object_id'):
@@ -201,4 +224,4 @@ TOOLS = {
     'get_join_outcomes': 'Grouped worker command results within 1–168 hours. Result codes are evidence, not automatically a root cause.',
     'get_tournament_diagnostics': 'MTT plans and SNG/MTT lobby/entry counts. Optional tournament name substring.',
     'get_incident_timeline': 'Recent command and session-end timeline within 1–168 hours.',
-    'get_worker_log_signals': 'Allowlisted authentication, funding, timeout and connection error counts from existing scoped machine log archives. No raw log lines.'}
+    'get_worker_log_signals': 'Scoped worker, updater and PDecision log evidence, collection status, timestamped restart/error events and file coverage. Use topic restart for worker_restarted, machine_id to focus a PC, around_utc (ISO timestamp with offset) for an incident. PC-local timestamps have unverified timezone; UTC events are filtered to +/-1 hour, local events to adjacent dates. At most one machine archive per call. No raw lines.'}

@@ -237,3 +237,37 @@ because tools execute SELECTs and roll back.
 
 Implementation references: [LangGraph quickstart](https://docs.langchain.com/oss/python/langgraph/quickstart)
 and [ChatOpenAI tool calling and structured output](https://docs.langchain.com/oss/python/integrations/chat/openai).
+
+
+## Customer-PC log evidence
+
+The local live launcher enables `POKERFILL_DIAGNOSTICS_COLLECT_LOGS=1`.
+For an operator's question or follow-up, the authenticated broker requests diagnostic
+bundles from active PCs assigned to the selected customer/site, reusing collections
+requested within 15 minutes and coalescing pending requests. Viewer requests never
+queue collections. The worker waits up to 45 seconds for pending collections before
+continuing; an offline PC does not block a diagnosis indefinitely. Collection does
+not restart applications, log accounts in, or change play. It is audited through
+the existing machine-log API. Requests remain diagnosis-only; the model has no write tool.
+
+`get_worker_log_signals` inventories up to 24 scoped PCs and reads one machine archive
+per call. Select `machine_id`, `topic` (restart/authentication/funding/connectivity/all)
+and optionally `around_utc`, an ISO timestamp with an explicit offset. It extracts
+only known operational event codes, timestamps, startup exit codes and file coverage
+from controller, updater and PDecision logs. Raw lines, hand data, account identities,
+paths, secrets and free-form exception messages are not sent to the model. Worker
+lines explicitly tagged for another site are excluded; untagged machine events have
+unconfirmed site attribution. Shared-PC bundles must match the archive site manifest.
+UTC events are narrowed to one hour either side of the incident. New collectors record the PC IANA timezone so worker timestamps can be converted to UTC. Ambiguous DST times remain unverified. Without that metadata, unzoned PC timestamps
+are retained from adjacent dates and labelled unverified; their order does not prove
+UTC correlation. Lists are bounded and lifecycle events take priority over generic errors.
+The incident timeline also includes scoped deployment timestamps.
+
+Installed collectors through 1.0.20 return at most 8 MiB per file and 48 MiB total.
+The prepared 1.0.21 collector streams complete retained application files up to
+128 MiB each and 512 MiB total before compression, retaining the 64 MiB compressed
+upload limit. Larger files remain bounded tails, and all omitted/truncated coverage
+is reported in the archive manifest. It includes only registered PokerSuite log
+locations, not arbitrary customer documents or configuration files. A normal signed
+PC release is required to install that collector; changing the local agent does not
+upgrade customer PCs. The built collector is not a fleet deployment.

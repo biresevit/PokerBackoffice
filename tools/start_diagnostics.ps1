@@ -6,6 +6,7 @@ if(!(Test-Path -LiteralPath $pythonPath)){throw 'Create diagnostics/.venv and in
 if(!$env:OPENAI_API_KEY){$env:OPENAI_API_KEY=[Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')}
 if($Mode -eq 'live' -and !$env:OPENAI_API_KEY){throw 'Configure OPENAI_API_KEY locally or pass -Mode recorded. Never paste API keys into chat.'}
 $env:POKERFILL_DIAGNOSTICS_MODE=$Mode
+$env:POKERFILL_DIAGNOSTICS_COLLECT_LOGS=if($Mode -eq 'live'){'1'}else{'0'}
 $env:POKERFILL_DIAGNOSTICS_URL='http://127.0.0.1:4310'
 $randomBytes=New-Object byte[] 48
 $rng=[System.Security.Cryptography.RandomNumberGenerator]::Create()

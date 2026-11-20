@@ -19,6 +19,13 @@ class Arguments(BaseModel):
     game_format: Literal['RING','SNG','MTT'] = 'RING'
 
 
+class LogArguments(BaseModel):
+    hours: int = Field(default=168, ge=1, le=168)
+    machine_id: int = Field(default=0, ge=0, description='0 inventories active site PCs; specify a machine to focus evidence.')
+    around_utc: str = Field(default='', max_length=40, description='Incident ISO timestamp with explicit timezone, e.g. 2026-11-19T19:02:00Z.')
+    topic: Literal['all','restart','authentication','funding','connectivity'] = 'all'
+
+
 class Finding(BaseModel):
     title: str
     explanation: str
@@ -54,6 +61,12 @@ current conditions. Use fresh tools when asked if something still holds. State
 when only part of a longer conversation is included; never pretend to recall omitted turns.
 Every finding must cite evidence IDs from tools; never invent IDs, balances, events or causes.
 Do not disclose account names, personal data, secrets, or strategy settings. State evidence gaps.
+For worker_restarted, inspect get_worker_log_signals with topic restart and the affected machine/time.
+The command cancellation does not explain the restart trigger. Distinguish a site task restart,
+managed process restart, deployment and machine reboot. Do not infer a reboot from application startup.
+Check collection status and file coverage: archives captured before the incident cannot explain it.
+If collection is pending, explain that logs are still being collected and a follow-up can recheck them.
+Unknown PC-local clock offsets must not be silently treated as UTC or the casino timezone.
 Investigate the requested period using bounded tools. Do not claim a full historical audit from current state.
 Stay within the question, and produce a concise diagnosis with limitations.'''
 
@@ -70,7 +83,7 @@ def investigate(prompt, data, *, mode='live', model=None, history=None, history_
         if isinstance(value, str):return value[:text_limit]
         return value
 
-    def collect(name, hours=24, tournament='', game_format='RING'):
+    def collect(name, hours=24, tournament='', game_format='RING', **log_args):
         if time.monotonic()>deadline:
             raise RuntimeError('Investigation time budget reached')
         if len(evidence) >= 12:
@@ -83,7 +96,7 @@ def investigate(prompt, data, *, mode='live', model=None, history=None, history_
                 scope=getattr(data,'scope',None)
                 if scope:item.update(site_id=scope.site_id,customer_id=scope.customer_id)
             else:
-                item = data.read(name, hours, tournament, game_format)
+                item = data.read(name, hours, tournament, game_format, **log_args)
         except Exception:
             # SQL errors may contain connection or schema details; don't give them to the model.
             item = {'source': name, 'captured_utc': datetime.now(timezone.utc).isoformat(),
@@ -124,7 +137,12 @@ def investigate(prompt, data, *, mode='live', model=None, history=None, history_
     for name, description in tool_specs.items():
         def run(hours=24, tournament='', game_format='RING', _name=name):
             return collect(_name, hours, tournament, game_format)
-        tools.append(StructuredTool.from_function(run, name=name, description=description, args_schema=Arguments))
+        if name=='get_worker_log_signals':
+            def run_logs(hours=168,machine_id=0,around_utc='',topic='all'):
+                return collect('get_worker_log_signals',hours,machine_id=machine_id,around_utc=around_utc,topic=topic)
+            tools.append(StructuredTool.from_function(run_logs,name=name,description=description,args_schema=LogArguments))
+        else:
+            tools.append(StructuredTool.from_function(run, name=name, description=description, args_schema=Arguments))
     bound = model.bind_tools(tools)
     by_name = {t.name: t for t in tools}
 
