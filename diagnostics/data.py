@@ -99,7 +99,7 @@ class Data:
                         AND NULLIF(b.LoginPassword,'') IS NOT NULL) THEN 1 ELSE 0 END,
                     CASE WHEN x.SessionId IS NOT NULL THEN 1 ELSE 0 END,
                     CASE WHEN l.LeaseUntilUtc>SYSUTCDATETIME() THEN 1 ELSE 0 END''', sid)
-                result = {'groups':result, 'capacity':db.one('''SELECT COUNT(*) AS EligibleActiveAccounts,
+                result = {'groups':result, 'capacity':db.one('''SELECT COUNT(*) AS EnabledActiveAccounts,
                     SUM(CASE WHEN DATEADD(minute,p.SessionCooldownMinutes,prior.ActualEndUtc)>SYSUTCDATETIME() THEN 1 ELSE 0 END) AS CoolingDown,
                     SUM(p.MaxTables) AS ConfiguredTableCapacity,
                     SUM(CASE WHEN p.MaxSngEntries=0 THEN 1 ELSE 0 END) AS SngDisabledAccounts,
@@ -108,7 +108,8 @@ class Data:
                     OUTER APPLY(SELECT MAX(x.ActualEndUtc) AS ActualEndUtc FROM scheduler.AccountSession x
                         WHERE x.BotAccountId=p.BotAccountId AND x.SiteId=p.SiteId AND x.IsOpen=0) prior
                     WHERE p.SiteId=%s AND p.DeletedUtc IS NULL AND p.IsEnabled=1 AND p.IsSynthetic=0 AND b.IsActive=1''',sid),
-                    'limitations':['Configured capacity is not immediately available capacity. Cooldowns, credentials, funds, game/stake limits and ownership can reduce it.']}
+                    'limitations':['Configured capacity is not immediately available capacity. Cooldowns, credentials, funds, game/stake limits and ownership can reduce it.',
+                        'CredentialsConfigured reports stored credentials only. EvenBet workers use their platform-default authentication for configured usernames, so missing stored email/password is not evidence of an unusable login. Login usability requires observed outcomes.']}
             elif name == 'get_join_outcomes':
                 result = db.rows('''SELECT TOP(100) Kind,Status,ResultCode,COUNT(*) AS Count,
                     MIN(UpdatedUtc) AS FirstUtc,MAX(UpdatedUtc) AS LastUtc

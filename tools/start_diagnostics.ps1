@@ -1,4 +1,4 @@
-param([ValidateSet('live','recorded')][string]$Mode='live', [int]$CustomerId=14004, [int]$Port=4280)
+param([ValidateSet('live','recorded')][string]$Mode='live', [int]$CustomerId=14004, [int]$Port=4280, [int[]]$AdditionalCustomerIds=@())
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 $pythonPath=Join-Path $projectRoot 'diagnostics/.venv/Scripts/python.exe'
@@ -13,10 +13,18 @@ $rng.GetBytes($randomBytes)
 $rng.Dispose()
 $env:POKERFILL_DIAGNOSTICS_TOKEN=[Convert]::ToBase64String($randomBytes)
 $worker=Start-Process -FilePath $pythonPath -ArgumentList '-m','uvicorn','diagnostics.service:app','--host','127.0.0.1','--port','4310','--no-access-log' -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+$extraPreviews=@()
 try {
+    $extraPort=$Port
+    foreach($extraCustomer in $AdditionalCustomerIds){
+        $extraPort++
+        $extraPreviews+=Start-Process -FilePath $pythonPath -ArgumentList 'tools/preview.py','--port',"$extraPort",'--customer-id',"$extraCustomer" -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+        Write-Host "Customer $extraCustomer diagnosis: http://127.0.0.1:$extraPort/backoffice#diagnostics"
+    }
     Write-Host "AI diagnosis: http://127.0.0.1:$Port/backoffice#diagnostics ($Mode mode). Ctrl+C stops the preview."
     & $pythonPath (Join-Path $PSScriptRoot 'preview.py') --port $Port --customer-id $CustomerId
 } finally {
+    foreach($preview in $extraPreviews){if(!$preview.HasExited){Stop-Process -Id $preview.Id}}
     if(!$worker.HasExited){Stop-Process -Id $worker.Id}
     Remove-Item Env:POKERFILL_DIAGNOSTICS_TOKEN -ErrorAction SilentlyContinue
 }

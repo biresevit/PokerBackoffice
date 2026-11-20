@@ -114,7 +114,10 @@ def test_graph_live_tool_call_and_structured_evidence():
             return AIMessage(content='Wallets unknown')
         def with_structured_output(self,*args,**kwargs):
             class Final:
-                def invoke(self,messages):return {'raw':AIMessage(content=''), 'parsed':Report(summary='Funds unknown', findings=[Finding(title='No balance evidence',explanation='No trusted snapshots',certainty='unknown',evidence_ids=['E4'])],limitations=['Funds cannot be confirmed'])}
+                def invoke(self,messages):
+                    assert 'Evidence provenance:' in messages[0].content
+                    assert 'final report formatting phase' in messages[0].content
+                    return {'raw':AIMessage(content=''), 'parsed':Report(summary='Funds unknown', findings=[Finding(title='No balance evidence',explanation='No trusted snapshots',certainty='unknown',evidence_ids=['E4'])],limitations=['Funds cannot be confirmed'])}
             return Final()
     result=investigate('Why fewer entries?',service.RecordedData(service.Scope(**scope())),model=Model())
     assert len(result['evidence'])==4

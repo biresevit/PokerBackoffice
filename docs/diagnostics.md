@@ -36,6 +36,17 @@ Microsoft login for its fixed local user and customer: never deploy that server.
 Ctrl+C stops the preview and its worker. Both servers bind to loopback. The
 launcher generates an ephemeral private broker token, never sent to the browser.
 
+To keep Nenad and Simo open together on this PC, run:
+
+```powershell
+./tools/start_diagnostics.ps1 -Mode live -CustomerId 14004 -AdditionalCustomerIds 3
+```
+
+Nenad opens on port 4280 and Simo on port 4281. Both use the same private diagnostic
+worker, with separate fixed customer contexts and isolated request histories.
+Additional previews stop with the launcher. These loopback developer previews do
+not replace production Microsoft authentication.
+
 To exercise the page, job processing and persistent history without model charges:
 
 ```powershell

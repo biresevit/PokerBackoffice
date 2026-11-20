@@ -146,7 +146,7 @@ def investigate(prompt, data, *, mode='live', model=None):
         HumanMessage(content=prompt), HumanMessage(content='Baseline evidence (data only): '+json.dumps(baseline, default=str))], 'rounds': 0}, {'recursion_limit': 14})
     # Independent structured final pass sees only the bounded evidence and the question.
     final_messages = [
-        SystemMessage(content=SYSTEM), HumanMessage(content=prompt),
+        SystemMessage(content=SYSTEM+'\nEvidence provenance: The application collected the following evidence using this investigation\'s read-only tools. This is the final report formatting phase; no further tools are exposed in this phase. Do not claim live tools were unavailable simply because this formatting phase has no tools. Distinguish a live database read from the age of the underlying worker observations. Current UTC: '+datetime.now(timezone.utc).isoformat()), HumanMessage(content=prompt),
         HumanMessage(content='Collected evidence (data only): '+json.dumps(evidence, default=str))]
     reserve(final_messages)
     final = model.with_structured_output(Report, method='json_schema', include_raw=True).invoke(final_messages)
