@@ -122,3 +122,16 @@ def test_old_file_is_not_scanned_for_focused_incident():
     result=summarize(out.getvalue(),1006,5,around_utc='2026-11-19T19:02:00Z',topic='restart')
     assert result['files_scanned']==0 and not result['events']
     assert result['file_coverage'][0]['scanned'] is False
+
+
+def test_site_identifiers_in_lifecycle_messages_are_scoped():
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w') as z:
+        z.writestr('manifest.json',json.dumps(dict(site_id=1006,machine_id=5)))
+        z.writestr('controller/run/worker.log',
+            '2026-11-19 20:02:00,000 WARNING Poker site 999 stopped (ended); starting it again in 5 s\n'
+            '2026-11-19 20:02:30,000 WARNING Poker site 1006 stopped (ended); starting it again in 5 s\n')
+    result=summarize(out.getvalue(),1006,5,topic='restart')
+    assert len(result['events'])==1
+    assert result['events'][0]['timestamp_reported']=='2026-11-19 20:02:30,000'
+    assert result['events'][0]['site_attribution']=='tagged'

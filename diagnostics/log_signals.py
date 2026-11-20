@@ -112,6 +112,8 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all", archive_
                     record_stamp=stamp;record_site=None
                 tagged=re.search(r'\[site (\d+)\]',line)
                 if tagged:record_site=int(tagged.group(1))
+                named_site=re.search(r'(?:Poker site|Playing poker site) (\d+) (?:stopped|on machine|was taken off)',line)
+                if named_site:record_site=int(named_site.group(1))
                 if not GATE.search(line):continue
                 # Skip explicitly tagged lines from another site on shared PCs.
                 if record_site is not None and record_site!=site_id:continue
