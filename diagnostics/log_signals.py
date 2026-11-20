@@ -119,7 +119,7 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all"):
                 for code in SIGNALS:
                     counts[code]+=len(SIGNAL_PATTERNS[code].findall(line))
                 codes=[code for code,pattern in EVENT_PATTERNS.items() if pattern.search(line)] if topic in ('all','restart') else []
-                allowed=SIGNALS if topic=='all' else {
+                allowed=(*SIGNALS,*ERROR_TYPES) if topic=='all' else {
                     'authentication':('CREDENTIAL_EXPIRED','LOGIN_REPLACED','LOGIN_FAILED','AUTH_FAILED'),
                     'funding':('INSUFFICIENT_CHIPS','INSUFFICIENT_FUNDS'),
                     'connectivity':('CONNECTION_CLOSED','TimeoutError','ConnectionError','SQLTransientConnectionError'),
@@ -153,7 +153,9 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all"):
             files+=1
     return {'machine_id':machine_id,'captured_utc':timestamp(str(manifest.get('captured_utc',''))), 'signals':{k:v for k,v in counts.items() if v}, 'files_scanned':files,
             'events':events,'matched_events':matched,'events_truncated':matched>24,'file_coverage':coverage[:24],
-            'coverage_truncated':len(coverage)>24,'topic':topic,'requested_around_utc':around_utc or None,'collector_time_zone':str(zone) if zone else None,
+            'coverage_truncated':len(coverage)>24,
+            'collection_omissions':dict(Counter('budget_exhausted' if f.get('skipped')=='Uncompressed collection budget exhausted' else 'file_unavailable' for f in manifest.get('files',[]) if f.get('skipped'))),
+            'topic':topic,'requested_around_utc':around_utc or None,'collector_time_zone':str(zone) if zone else None,
             'event_ranking':'Lifecycle templates first, then proximity to requested wall-clock time (local timezone unverified) or latest reported time; bounded to 24 events.',
             'limitations':['Counts cover bounded archive tails, not necessarily the whole requested time range.',
                 'Signals may repeat one incident. A zero count does not establish absence.',
