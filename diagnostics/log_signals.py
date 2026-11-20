@@ -4,7 +4,7 @@ import json
 import re
 import zipfile
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SIGNALS = ('CREDENTIAL_EXPIRED','LOGIN_REPLACED','INSUFFICIENT_CHIPS','INSUFFICIENT_FUNDS',
@@ -85,13 +85,22 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all", archive_
             if isinstance(name,str) and len(name)<=80 and re.fullmatch(r'[A-Za-z0-9_+/-]+',name):zone=ZoneInfo(name)
         except (ZoneInfoNotFoundError,ValueError):pass
         files=0
-        for i in entries:
+        for file_number,i in enumerate(entries):
             # Only known application log roots; raw lines/hand data never leave this parser.
             if not i.filename.lower().startswith(('controller/','worker/','updater/','pdecision/')) or not re.search(r'\.log(?:[.\d-].*)?$',i.filename.lower()):
                 continue
             if i.file_size>160*1024*1024: continue
-            text=z.read(i).decode('utf-8',errors='replace')
             source=i.filename.split('/')[0].lower()
+            meta=next((f for f in manifest.get('files',[]) if f.get('file')==i.filename),{})
+            modified=timestamp(str(meta.get('modified_utc','')))
+            try:modified_time=datetime.fromisoformat(modified.replace('Z','+00:00')) if modified else None
+            except ValueError:modified_time=None
+            if around and modified_time and modified_time.tzinfo and modified_time<around-timedelta(hours=1):
+                coverage.append({'source':source,'file_index':file_number,'scanned':False,
+                    'reason':'File modification precedes requested incident window; filesystem UTC metadata, not a complete content audit.',
+                    'modified_utc':modified,'bytes_scanned':0})
+                continue
+            text=z.read(i).decode('utf-8',errors='replace')
             stamps=[];record_stamp=None;record_site=None
             for line in text.splitlines():
                 stamp=timestamp(line)
@@ -127,7 +136,7 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all", archive_
                 codes += [code for code in allowed if SIGNAL_PATTERNS[code].search(line)]
                 for code in codes:
                     event={'code':code,'timestamp_reported':stamp,'clock':'offset_in_timestamp' if stamp and re.search(r'(Z|[+-]\d{2}:\d{2})$',stamp) else 'PC local time; timezone unverified',
-                           'source':source,'file_index':files,'site_attribution':'tagged' if record_site else 'machine-wide; site attribution unconfirmed'}
+                           'source':source,'file_index':file_number,'site_attribution':'tagged' if record_site else 'machine-wide; site attribution unconfirmed'}
                     if resolved!=stamp:
                         event['timestamp_utc']=datetime.fromisoformat(resolved).astimezone(timezone.utc).isoformat()
                         event['clock']='collector timezone: '+str(zone)
@@ -147,7 +156,7 @@ def summarize(blob, site_id, machine_id, *, around_utc="", topic="all", archive_
                     events.sort(key=rank)
                     del events[24:]
             meta=next((f for f in manifest.get('files',[]) if f.get('file')==i.filename),{})
-            coverage.append({'source':source,'file_index':files,'first_timestamp_reported':stamps[0] if stamps else None,
+            coverage.append({'source':source,'file_index':file_number,'scanned':True,'first_timestamp_reported':stamps[0] if stamps else None,
                 'last_timestamp_reported':stamps[-1] if stamps else None,'bytes_scanned':i.file_size,
                 'truncated':meta.get('truncated') if isinstance(meta.get('truncated'),bool) else 'unknown','original_bytes':meta.get('original_bytes') if isinstance(meta.get('original_bytes'),int) else None})
             files+=1

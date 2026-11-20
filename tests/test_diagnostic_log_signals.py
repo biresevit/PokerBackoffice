@@ -111,3 +111,14 @@ def test_shared_archive_requires_explicit_verified_enrollment_site():
     result=summarize(archive(1),1004,5,archive_site_id=1)
     assert result['machine_id']==5
     with pytest.raises(ValueError):summarize(archive(1),1004,5,archive_site_id=1006)
+
+
+def test_old_file_is_not_scanned_for_focused_incident():
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w') as z:
+        z.writestr('manifest.json',json.dumps(dict(site_id=1006,machine_id=5,files=[
+            dict(file='worker/old.log',modified_utc='2026-11-16T00:00:00Z')])))
+        z.writestr('worker/old.log','2026-11-16T00:00:00Z Updater restarted directly.\n')
+    result=summarize(out.getvalue(),1006,5,around_utc='2026-11-19T19:02:00Z',topic='restart')
+    assert result['files_scanned']==0 and not result['events']
+    assert result['file_coverage'][0]['scanned'] is False
