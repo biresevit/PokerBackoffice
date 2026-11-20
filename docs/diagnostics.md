@@ -1,4 +1,18 @@
-# AI diagnosis: local first
+# AI diagnosis
+
+The canonical implementation now lives in [PokerFill-AI-Diagnostics](https://github.com/biresevit/PokerFill-AI-Diagnostics).
+It contains the LangGraph agent, typed tools, conversation service, SQL history adapter,
+log parser, public synthetic demo, screenshots and Azure deployment instructions.
+
+PokerBackoffice retains the authenticated Microsoft/SWA broker and production investigation page.
+The `diagnostics/*.py` files here are compatibility imports, not a second implementation.
+Install the standalone sibling project in the diagnostic environment for local tooling.
+
+Production uses the HTTPS endpoint in `POKERFILL_DIAGNOSTICS_URL` and a matching server-only
+`POKERFILL_DIAGNOSTICS_TOKEN`. Cloud history is stored in Azure SQL. Local previews remain
+an explicit development option; no model credential or service token reaches the browser.
+
+The notes below describe the Backoffice integration and local development workflow.
 
 The Backoffice **AI diagnosis** page accepts operational questions for the selected
 EvenBet or BluffPoker site. Requests and answers are private to the authenticated

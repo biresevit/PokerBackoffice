@@ -47,7 +47,7 @@ def dispatch(store, site_id, method, tail, body):
     token = os.getenv('POKERFILL_DIAGNOSTICS_TOKEN', '')
     parsed = urlsplit(base)
     if not base or len(token) < 32:
-        raise Error(503, 'AI diagnosis is not configured. Start the local diagnostic service first.')
+        raise Error(503, 'AI diagnosis is not configured. Configure the diagnostic service endpoint.')
     if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost')):
         raise Error(503, 'The diagnostic service requires a private secure connection')
     if method == 'GET' and tail is None:
@@ -99,4 +99,4 @@ def dispatch(store, site_id, method, tail, body):
             raise Error(e.code, {404:'Diagnosis request not found',409:'Request ID already used',429:'Investigation limit reached; try again later'}[e.code])
         raise Error(503, 'Diagnostic service unavailable') from None
     except (OSError, ValueError):
-        raise Error(503, 'Diagnostic service unavailable. Check the local worker is running.') from None
+        raise Error(503, 'Diagnostic service unavailable. Check the diagnostic service configuration.') from None
