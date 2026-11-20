@@ -16,6 +16,7 @@ MAX_BYTES = 64*1024*1024
 # Match known operational templates, never return exception messages or arbitrary log text.
 EVENTS = {
  'worker_site_restart': r'Poker site \d+ stopped \(',
+ 'table_closed_response': r'\bTABLE_CLOSED\b',
  'worker_started': r'Playing poker site \d+ on machine \d+',
  'heartbeat_timeout': r'No heartbeat reached the database for \d+',
  'database_retry': r'Temporary SQL failure',

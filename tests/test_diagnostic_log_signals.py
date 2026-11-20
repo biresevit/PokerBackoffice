@@ -135,3 +135,14 @@ def test_site_identifiers_in_lifecycle_messages_are_scoped():
     assert len(result['events'])==1
     assert result['events'][0]['timestamp_reported']=='2026-11-19 20:02:30,000'
     assert result['events'][0]['site_attribution']=='tagged'
+
+
+def test_closed_table_startup_error_is_exposed_without_raw_details():
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w') as z:
+        z.writestr('manifest.json',json.dumps(dict(site_id=1006,machine_id=5)))
+        z.writestr('controller/run/worker.log',
+            '2026-11-20 14:55:53,650 WARNING Poker site 1006 stopped (connection: TABLE_CLOSED (code=404, ext=None)); starting it again in 20 s password=private\n')
+    result=summarize(out.getvalue(),1006,5,topic='restart')
+    assert {'worker_site_restart','table_closed_response'}=={e['code'] for e in result['events']}
+    assert 'private' not in json.dumps(result)
