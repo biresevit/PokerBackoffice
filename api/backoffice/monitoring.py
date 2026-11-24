@@ -6,6 +6,7 @@ customer only sees its own PCs."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .validation import Error, integer
 
@@ -53,7 +54,15 @@ class Monitoring:
         self.store, self.db = store, store.db
 
     def get(self, site_id, query):
-        self.store.site(site_id)
+        site = self.store.site(site_id)
+        page_size = integer(query.get('page_size', 20), 20, 100, 'rows')
+        if page_size not in (20, 50, 100):
+            raise Error(400, 'Choose 20, 50 or 100 rows')
+        page = integer(query.get('page', 1), 1, field='page')
+        try:
+            zone = ZoneInfo(query.get('timezone') or site['timezone'])
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            raise Error(400, 'Invalid timezone') from None
         now = datetime.now(timezone.utc)
         stop = parse_time(query.get("to"), now)
         start = parse_time(query.get("from"), stop - timedelta(hours=24))
@@ -87,44 +96,66 @@ class Monitoring:
         twhere, targs = ["t.SiteId=%s", "t.OccurredUtc>=%s", "t.OccurredUtc<%s"], [site_id, start.replace(tzinfo=None), stop.replace(tzinfo=None)]
         if machine is not None:
             twhere.append("t.MachineId=%s"); targs.append(machine)
+        # Aggregate counts independently of the detail page. UTC minute buckets
+        # also preserve local-day boundaries in half/quarter-hour timezones.
+        bucket = 'DATEADD(minute,DATEDIFF(minute,0,t.OccurredUtc),0)'
+        counts = self.db.rows(f"""SELECT t.MachineId AS machine,t.Kind AS kind,
+                {bucket} AS at,COUNT_BIG(*) AS count
+            FROM scheduler.ActionTimeout t WHERE {" AND ".join(twhere)}
+            GROUP BY t.MachineId,t.Kind,{bucket}""", *targs)
+        total = sum(r['count'] for r in counts)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, pages)
         timeouts = self.db.rows(f"""SELECT t.MachineId AS machine,t.Kind AS kind,t.OccurredUtc AS at,
                 COALESCE(b.Username,t.Username) AS username,t.TableId AS table_id,l.TableName AS table_name
             FROM scheduler.ActionTimeout t LEFT JOIN dbo.BotAccount b ON b.BotAccountId=t.BotAccountId
             LEFT JOIN scheduler.LobbyTable l ON l.SiteId=t.SiteId AND l.TableId=t.TableId
-            WHERE {" AND ".join(twhere)} ORDER BY t.OccurredUtc DESC""", *targs)
+            WHERE {" AND ".join(twhere)} ORDER BY t.OccurredUtc DESC,t.TimeoutId DESC
+            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY""", *targs, (page-1)*page_size, page_size)
         hours = {}
         for r in rows:
             hours.setdefault(r["hour"], []).append(r)
         missed_by_hour = {}
-        for t in timeouts:
-            missed_by_hour.setdefault(t["at"].replace(minute=0, second=0, microsecond=0), []).append(t)
+        day = start.astimezone(zone).date()
+        last_day = (stop-timedelta(microseconds=1)).astimezone(zone).date()
+        daily = {}
+        while day <= last_day:
+            daily[day.isoformat()] = 0
+            day += timedelta(days=1)
+        for t in counts:
+            hour = t['at'].replace(minute=0, second=0, microsecond=0)
+            missed_by_hour[hour] = missed_by_hour.get(hour, 0) + t['count']
+            day = t['at'].replace(tzinfo=timezone.utc).astimezone(zone).date().isoformat()
+            daily[day] = daily.get(day, 0) + t['count']
         series, by_street = [], {n: [] for n in STREETS}
         for hour in sorted(set(hours) | set(missed_by_hour)):
             s = summary(hours.get(hour, []))
             at = hour.replace(tzinfo=timezone.utc)
             series.append({"at": at, "decisions": s["decisions"], "avg_ms": s["avg_ms"],
-                           "max_ms": s["max_ms"], "missed": len(missed_by_hour.get(hour, []))})
+                           "max_ms": s["max_ms"], "missed": missed_by_hour.get(hour, 0)})
             for street in STREETS:
                 one = summary([r for r in hours.get(hour, []) if r["street"] == street])
                 if one["decisions"]:
                     by_street[street].append({"at": at, "decisions": one["decisions"], "avg_ms": one["avg_ms"],
                                               "max_ms": one["max_ms"], "p90_under_ms": one["p90_under_ms"]})
         per_machine = []
-        for mid in sorted({r["machine"] for r in rows} | {t["machine"] for t in timeouts}):
-            mine = [t for t in timeouts if t["machine"] == mid]
+        for mid in sorted({r["machine"] for r in rows} | {t["machine"] for t in counts}):
+            mine = [t for t in counts if t["machine"] == mid]
             per_machine.append({"id": mid, "name": (machines.get(mid) or {}).get("name") or f"PC {mid}",
                                 **summary([r for r in rows if r["machine"] == mid]),
-                                "sit_out": sum(t["kind"] == "sit_out" for t in mine),
-                                "clock_acted": sum(t["kind"] == "clock_acted" for t in mine)})
+                                "sit_out": sum(t['count'] for t in mine if t["kind"] == "sit_out"),
+                                "clock_acted": sum(t['count'] for t in mine if t["kind"] == "clock_acted")})
         return {
-            "from": start, "to": stop, "timezone": self.store.site(site_id)["timezone"],
+            "from": start, "to": stop, "timezone": zone.key,
             "machines": [{"id": m["id"], "name": m["name"]} for m in sorted(machines.values(), key=lambda m: m["name"])],
             "overall": summary(rows),
             "streets": [{"street": s, "name": n, **summary([r for r in rows if r["street"] == s])} for s, n in STREETS.items()],
             "per_machine": per_machine, "series": series,
             "series_by_street": [{"street": n, "name": STREETS[n], "points": by_street[n]} for n in STREETS],
-            "missed": {"total": len(timeouts), "sit_out": sum(t["kind"] == "sit_out" for t in timeouts),
-                       "clock_acted": sum(t["kind"] == "clock_acted" for t in timeouts),
+            "missed_daily": [{'date': day, 'missed': count} for day, count in sorted(daily.items())],
+            "missed": {"total": total, "sit_out": sum(t['count'] for t in counts if t["kind"] == "sit_out"),
+                       "clock_acted": sum(t['count'] for t in counts if t["kind"] == "clock_acted"),
+                       "page": page, "page_size": page_size, "total_pages": pages,
                        "recent": [{**t, "at": t["at"].replace(tzinfo=timezone.utc),
-                                   "machine_name": (machines.get(t["machine"]) or {}).get("name")} for t in timeouts[:200]]},
+                                   "machine_name": (machines.get(t["machine"]) or {}).get("name")} for t in timeouts]},
         }
