@@ -47,6 +47,42 @@ export function installMonitoring(h){
   return `<div class="monitor-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Missed actions per hour">${frame(ax,W,H,L,R,B,ticks)}${pts.map(p=>`<rect class="missed" x="${(x(p)-bar/2).toFixed(1)}" y="${y(p.missed).toFixed(1)}" width="${bar.toFixed(1)}" height="${(H-B-y(p.missed)).toFixed(1)}"><title>${esc(label(p.at))}: ${p.missed} missed</title></rect>`).join('')}</svg></div>`;
  }
 
+ function inspectChart(svg,points,x,describe,bottom){
+  if(!svg||!points.length)return;
+  const ns='http://www.w3.org/2000/svg',line=document.createElementNS(ns,'line');
+  line.setAttribute('y1','12');line.setAttribute('y2',String(bottom));
+  line.setAttribute('stroke','#2d6553');line.setAttribute('stroke-dasharray','4 4');
+  line.setAttribute('pointer-events','none');line.classList.add('monitor-crosshair');svg.append(line);
+  const readout=document.createElement('div');readout.className='entry-readout monitor-readout';
+  readout.setAttribute('role','status');readout.setAttribute('aria-live','polite');svg.after(readout);
+  svg.setAttribute('tabindex','0');svg.style.cursor='crosshair';
+  let index=points.length-1;
+  const inspect=i=>{index=Math.max(0,Math.min(points.length-1,i));const px=x(points[index],index);
+   line.setAttribute('x1',String(px));line.setAttribute('x2',String(px));readout.textContent=describe(points[index]);};
+  const locate=event=>{const matrix=svg.getScreenCTM();if(!matrix)return;
+   const px=new DOMPoint(event.clientX,event.clientY).matrixTransform(matrix.inverse()).x;
+   let nearest=0;for(let i=1;i<points.length;i++)if(Math.abs(x(points[i],i)-px)<Math.abs(x(points[nearest],nearest)-px))nearest=i;
+   inspect(nearest);};
+  svg.onpointermove=locate;svg.onpointerdown=locate;
+  svg.onkeydown=event=>{const next={ArrowLeft:index-1,ArrowRight:index+1,Home:0,End:points.length-1}[event.key];
+   if(next!==undefined){event.preventDefault();inspect(next);}};
+  inspect(index);
+ }
+
+ function bindCharts(d){
+  const ax=axis(d),time=at=>new Date(at).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  document.querySelectorAll('.monitor-grid .monitor-chart').forEach((root,i)=>{
+   const points=d.series_by_street[i].points;
+   inspectChart(root.querySelector('svg'),points,p=>50+(+new Date(p.at)-ax.first)/ax.span*(440-50-12),
+    p=>`${time(p.at)} | Average: ${ms(p.avg_ms)} | Decisions: ${p.decisions.toLocaleString()}`,176);
+  });
+  inspectChart($('svg[aria-label="Missed actions per hour"]'),d.series.filter(p=>p.missed),
+   p=>50+(+new Date(p.at)-ax.first)/ax.span*(900-50-12),p=>`${time(p.at)} | Missed actions: ${p.missed.toLocaleString()}`,126);
+  inspectChart($('svg[aria-label="Missed actions per day"]'),d.missed_daily,
+   (p,i)=>50+(i+.5)*(900-50-12)/d.missed_daily.length,
+   p=>`${new Date(p.date+'T12:00:00').toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})} | Missed actions: ${p.missed.toLocaleString()}`,145);
+ }
+
  async function page(gen){
   const key=`${state.customer?.id}/${state.site?.id}`;
   if(key!==contextKey){filters=null;pageNumber=1;contextKey=key;}
@@ -70,6 +106,7 @@ export function installMonitoring(h){
    ${card('By PC',d.per_machine.length?table(['PC','Decisions','Average','90% under','Slowest','Unplanned sit-outs','Acted by the clock'],d.per_machine.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td>${p.decisions.toLocaleString()}</td><td>${esc(ms(p.avg_ms))}</td><td>${p.decisions?esc(under(p.p90_under_ms).replace('under ','')):'—'}</td><td>${esc(ms(p.max_ms))}</td><td>${p.sit_out}</td><td>${p.clock_acted}</td></tr>`)):'<div class="card-body">'+empty('No data in this range','The PCs write decision times and missed actions every 5 minutes (release 2026.11.13.8 or later).')+'</div>')}
    ${card(`Missed actions <span class="sub">${m.total}</span>`,`<div class="card-body"><p class="sub">Uses the From, To and PC filters above. Opponent count applies to decision times.</p>${select('Rows per page','missed_page_size',filters.page_size,[['20','20'],['50','50'],['100','100']])}</div>`+`<div id="missed-rows">`+(m.recent.length?table(['Time','Bot','Table','PC','What happened'],m.recent.map(t=>`<tr><td>${esc(when(t.at))}</td><td>${esc(t.username||'—')}</td><td>${esc(t.table_name||t.table_id||'—')}</td><td>${esc(t.machine_name||t.machine)}</td><td>${t.kind==='clock_acted'?'The site acted when the bot’s time ran out':'Sat out by the table without a planned break'}</td></tr>`)):'<div class="card-body"><p class="sub">No missed actions in this range.</p></div>')+`</div><div class="card-body"><button type="button" class="button" id="missed-prev" ${m.page<=1?'disabled':''}>Previous</button> <span>Page ${m.page} of ${m.total_pages} · ${m.total?((m.page-1)*m.page_size+1):0}–${Math.min(m.page*m.page_size,m.total)} of ${m.total}</span> <button type="button" class="button" id="missed-next" ${m.page>=m.total_pages?'disabled':''}>Next</button></div>`)}`;
   if(!render(gen,'How long PDecision takes to decide, and how often bots miss their turn. Decision time is the answer from PDecision only, without the human-like pause before acting. Times are in your browser’s time zone.',body))return;
+  bindCharts(d);
   $('#monitor-filters').onsubmit=e=>{e.preventDefault();const v=Object.fromEntries(new FormData(e.target));if(new Date(v.from)>=new Date(v.to)){toast('The start must be before the end',true);return;}filters={...filters,...v};pageNumber=1;h.navigate();};
   $('#monitor-reset').onclick=()=>{filters=defaults();pageNumber=1;h.navigate();};
   $('[name=missed_page_size]').onchange=e=>{filters.page_size=e.target.value;pageNumber=1;focusMissed=true;h.navigate();};

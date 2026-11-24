@@ -67,6 +67,25 @@ def main():
         assert page.locator('.monitor-grid svg').count()==4
         assert not any('9999999' in t for t in page.locator('.monitor-grid').all_text_contents())
         assert page.get_by_role('img',name='Missed actions per day',exact=True).count()==1
+        assert page.locator('.monitor-readout').count()==6
+        count_before_hover=len(requests)
+        first=page.locator('.monitor-grid svg').first
+        point=first.locator('circle.avg').first.bounding_box()
+        page.mouse.move(point['x']+point['width']/2,point['y']+point['height']/2)
+        readout=first.locator('xpath=following-sibling::div[contains(@class,"monitor-readout")]')
+        assert '11:00' in readout.inner_text() and 'Average: 100 ms' in readout.inner_text()
+        first.focus();page.keyboard.press('End')
+        assert '12:00' in readout.inner_text()
+        for name in ('Missed actions per hour','Missed actions per day'):
+            svg=page.get_by_role('img',name=name,exact=True)
+            bar=svg.locator('rect.missed').first
+            expected=bar.locator('title').text_content().split(': ')[-1].split()[0]
+            bar.scroll_into_view_if_needed()
+            box=bar.bounding_box()
+            page.mouse.move(box['x']+box['width']/2,box['y']+max(1,box['height']/2))
+            text=svg.locator('xpath=following-sibling::div[contains(@class,"monitor-readout")]').inner_text()
+            assert '2026' in text and f'Missed actions: {int(expected):,}' in text
+        assert len(requests)==count_before_hover,'Hover must not request new data'
         page.click('#missed-next');page.wait_for_function("document.querySelector('#missed-rows tbody td:nth-child(2)').textContent==='Sample0020'")
         assert requests[-1]['page']=='2' and requests[-1]['page_size']=='20'
         assert requests[-1]['from']==requests[0]['from'] and requests[-1]['to']==requests[0]['to']
@@ -83,6 +102,6 @@ def main():
         assert requests[-1]['machine']=='all' and requests[-1]['page_size']=='20'
         assert not errors,errors
         browser.close()
-    print('PASS: average-only street charts, daily chart, 20/50/100 server pages, preserved filters and reset.')
+    print('PASS: average-only charts, time/value hover and keyboard readouts, daily chart, paging and filters.')
 
 if __name__=='__main__':main()
