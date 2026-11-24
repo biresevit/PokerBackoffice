@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .validation import Error, FORMATS, PROFILES, TIERS, choice, integer, username, windows, stake_bands, tournament_exclusions, account_settings, parse_csv
 from .distributions import Distributions, FIELDS as DISTRIBUTED
+from .human_seats import current as current_human_seats
 
 
 ENTRY_FORMAT_SQL = "CASE WHEN lt.TableType IN ('SNG','MTT') THEN lt.TableType ELSE 'RING' END"
@@ -871,7 +872,8 @@ class Store:
                 "machines": machines,
                 "machine_summary":{"online":online,"offline":len(machines)-online,"warnings":warnings,
                                    "offline_machines":offline_machines},
-                "hand_histories": history, "schedule": schedule}
+                "hand_histories": history, "schedule": schedule,
+                "human_seats": current_human_seats(self.db, site_id)}
 
     def entry_metrics(self, site_id, query):
         """Scheduled target and running entries of one format over a bounded date range.
@@ -922,5 +924,13 @@ class Store:
             live=self.db.one(f"""SELECT COUNT(*) AS n FROM backoffice.EntryPresence p {ENTRY_LOBBY_JOIN}
                 WHERE p.SiteId=%s AND p.IsOpen=1 AND {seated} AND {ENTRY_FORMAT_SQL}=%s""",site_id,fmt)['n']
             points[-1]['running']=live
+        from .human_seats import history as human_history, bucket
+        humans = human_history(self.db, site_id, start, stop, step_minutes) if fmt == 'RING' else None
+        if humans:
+            observed = {p['at']: p for p in humans['points']}
+            for point in points:
+                sample = observed.get(bucket(point['at'], step_minutes), {})
+                point['humans'] = sample.get('humans')
+                point['human_partial'] = sample.get('partial', False)
         return {"format": fmt, "from": from_day.isoformat(), "to": to_day.isoformat(), "timezone": site["timezone"],
-                "step_minutes": step_minutes, "points": points}
+                "step_minutes": step_minutes, "points": points, "human_seats": humans}

@@ -69,13 +69,29 @@ export function installMonitoring(h){
   inspect(index);
  }
 
+ function humanChart(d,ax){
+  const points=d.human_seats?.points||[],known=points.filter(p=>p.humans!=null);
+  if(!known.length)return '<p class="sub card-body">No valid human-seat samples in this range. Human history cannot be reconstructed from current lobby data.</p>';
+  const W=900,H=180,L=50,R=12,B=24,top=Math.max(1,...known.map(p=>p.maximum??p.humans))*1.1;
+  const x=p=>L+(+new Date(p.at)-ax.first)/ax.span*(W-L-R),y=v=>H-B-v/top*(H-B-12);
+  let started=false;
+  const path=points.map(p=>{if(p.humans==null){started=false;return '';}
+   const part=`${started?'L':'M'}${x(p).toFixed(1)},${y(p.humans).toFixed(1)}`;started=true;return part;}).join(' ');
+  return `<div class="monitor-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Human ring seats per hour">${frame(ax,W,H,L,R,B,[0,top].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-5}" y="${y(v)+4}" class="end">${Math.round(v)}</text>`).join(''))}<path style="fill:none;stroke:#6683aa;stroke-width:2.5" d="${path}"/>${known.map(p=>`<circle style="fill:#6683aa" cx="${x(p)}" cy="${y(p.humans)}" r="3"/>`).join('')}</svg></div>`;
+ }
+
+ const humanValue=p=>p?.humans==null?'unknown':`${p.partial?'≥':''}${p.humans} average (range ${p.minimum}–${p.maximum}; ${p.known_samples}/${p.samples} received samples valid${p.partial?'; partial table coverage':''})`;
+
  function bindCharts(d){
   const ax=axis(d),time=at=>new Date(at).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  const humans=new Map((d.human_seats?.points||[]).map(p=>[+new Date(p.at),p]));
   document.querySelectorAll('.monitor-grid .monitor-chart').forEach((root,i)=>{
    const points=d.series_by_street[i].points;
    inspectChart(root.querySelector('svg'),points,p=>50+(+new Date(p.at)-ax.first)/ax.span*(440-50-12),
-    p=>`${time(p.at)} | Average: ${ms(p.avg_ms)} | Decisions: ${p.decisions.toLocaleString()}`,176);
+    p=>`${time(p.at)} | Average: ${ms(p.avg_ms)} | Decisions: ${p.decisions.toLocaleString()} | Human ring seats: ${humanValue(humans.get(+new Date(p.at)))}`,176);
   });
+  inspectChart($('svg[aria-label="Human ring seats per hour"]'),d.human_seats?.points||[],
+   p=>50+(+new Date(p.at)-ax.first)/ax.span*(900-50-12),p=>`${time(p.at)} | Human ring seats: ${humanValue(p)}`,156);
   inspectChart($('svg[aria-label="Missed actions per hour"]'),d.series.filter(p=>p.missed),
    p=>50+(+new Date(p.at)-ax.first)/ax.span*(900-50-12),p=>`${time(p.at)} | Missed actions: ${p.missed.toLocaleString()}`,126);
   inspectChart($('svg[aria-label="Missed actions per day"]'),d.missed_daily,
@@ -100,6 +116,7 @@ export function installMonitoring(h){
     <button class="button primary">Apply filters</button><button type="button" class="button" id="monitor-reset">Last 24 hours</button></form>
    ${stats([['Decisions',o.decisions.toLocaleString(),'answered by PDecision'],['Average decision time',ms(o.avg_ms),`half ${under(o.p50_under_ms)}, 90% ${under(o.p90_under_ms)}`],['Slowest decision',ms(o.max_ms),`${pct(o.slow_share)} took 2 s or more`],['Missed actions',m.total.toLocaleString(),`${m.sit_out} unplanned sit-outs · ${m.clock_acted} acted by the site's clock`]])}
    ${card('Decision time per hour',`<div class="monitor-grid">${d.series_by_street.map(st=>streetChart(st,axis(d))).join('')}</div><div class="monitor-legend card-body"><span><i class="avg"></i>Average</span><small>Hover a point for its hour, average and number of decisions.</small></div>`)}
+   ${card('Human ring seats per hour',humanChart(d,axis(d))+`<div class="card-body"><p class="sub">${esc(d.human_seats?.note||'')} ${filters.machine==='all'?'All observed ring tables on this site.':'Ring tables with seated bot entries on the selected PC; a shared table is counted once.'} Uses the date and PC filters. Opponent count applies to decision times only. Averages use valid sampled minutes; unsampled minutes are unknown. Decision times include all game formats. Presence alone does not establish a cause for slower decisions.</p></div>`)}
    ${card('Missed actions per hour',missedChart(d.series,axis(d)))}
    ${card('Missed actions per day',dailyChart(d.missed_daily))}
    ${card('By street',table(['Street','Decisions','Average','Half under','90% under','Slowest','2 s or more'],d.streets.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td>${s.decisions.toLocaleString()}</td><td>${esc(ms(s.avg_ms))}</td><td>${s.decisions?esc(under(s.p50_under_ms).replace('under ','')):'—'}</td><td>${s.decisions?esc(under(s.p90_under_ms).replace('under ','')):'—'}</td><td>${esc(ms(s.max_ms))}</td><td>${pct(s.slow_share)}</td></tr>`)))}

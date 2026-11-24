@@ -20,6 +20,9 @@ events=[dict(machine=5 if i%2==0 else 1030,kind='sit_out',at=NOW.replace(tzinfo=
 
 class Db:
     def rows(self,sql,*args):
+        if 'HumanSeatSample' in sql:
+            return [dict(at=NOW.replace(tzinfo=None)-timedelta(hours=1),humans=3.5,
+                         minimum=2,maximum=5,known_samples=40,samples=60,fresh_tables=2,total_tables=2)]
         if 'MachineAssignment' in sql:return [{'id':5,'name':'Sample PC 5'},{'id':1030,'name':'Sample PC 1030'}]
         if 'DecisionMetric' in sql:
             return [dict(machine=5,hour=NOW.replace(tzinfo=None)-timedelta(hours=hour),street=street,decisions=10,
@@ -67,9 +70,13 @@ def main():
         assert page.locator('.monitor-grid svg').count()==4
         assert not any('9999999' in t for t in page.locator('.monitor-grid').all_text_contents())
         assert page.get_by_role('img',name='Missed actions per day',exact=True).count()==1
-        assert page.locator('.monitor-readout').count()==6
+        assert page.locator('.monitor-readout').count()==7
+        human=page.get_by_role('img',name='Human ring seats per hour',exact=True)
+        human.focus();page.keyboard.press('End')
+        assert '3.5 average' in human.locator('xpath=following-sibling::div').inner_text()
         count_before_hover=len(requests)
         first=page.locator('.monitor-grid svg').first
+        first.scroll_into_view_if_needed()
         point=first.locator('circle.avg').first.bounding_box()
         page.mouse.move(point['x']+point['width']/2,point['y']+point['height']/2)
         readout=first.locator('xpath=following-sibling::div[contains(@class,"monitor-readout")]')

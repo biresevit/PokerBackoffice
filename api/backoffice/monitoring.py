@@ -145,7 +145,10 @@ class Monitoring:
                                 **summary([r for r in rows if r["machine"] == mid]),
                                 "sit_out": sum(t['count'] for t in mine if t["kind"] == "sit_out"),
                                 "clock_acted": sum(t['count'] for t in mine if t["kind"] == "clock_acted")})
+        from .human_seats import history as human_history
+        humans = human_history(self.db, site_id, start, stop, machine=machine)
         return {
+            "human_seats": humans,
             "from": start, "to": stop, "timezone": zone.key,
             "machines": [{"id": m["id"], "name": m["name"]} for m in sorted(machines.values(), key=lambda m: m["name"])],
             "overall": summary(rows),
