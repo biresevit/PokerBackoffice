@@ -77,7 +77,7 @@ export function installMonitoring(h){
   let started=false;
   const path=points.map(p=>{if(p.humans==null){started=false;return '';}
    const part=`${started?'L':'M'}${x(p).toFixed(1)},${y(p.humans).toFixed(1)}`;started=true;return part;}).join(' ');
-  return `<div class="monitor-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Human ring seats per hour">${frame(ax,W,H,L,R,B,[0,top].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-5}" y="${y(v)+4}" class="end">${Math.round(v)}</text>`).join(''))}<path style="fill:none;stroke:#6683aa;stroke-width:2.5" d="${path}"/>${known.map(p=>`<circle style="fill:#6683aa" cx="${x(p)}" cy="${y(p.humans)}" r="3"/>`).join('')}</svg></div>`;
+  return `<div class="monitor-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Human ring seats per hour">${frame(ax,W,H,L,R,B,[0,top].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-5}" y="${y(v)+4}" class="end">${Math.round(v)}</text>`).join(''))}<path style="fill:none;stroke:#963d83;stroke-width:2.5" d="${path}"/>${known.map(p=>`<circle style="fill:#963d83" cx="${x(p)}" cy="${y(p.humans)}" r="3"/>`).join('')}</svg></div>`;
  }
 
  const humanValue=p=>p?.humans==null?'unknown':`${p.partial?'≥':''}${p.humans} average (range ${p.minimum}–${p.maximum}; ${p.known_samples}/${p.samples} received samples valid${p.partial?'; partial table coverage':''})`;

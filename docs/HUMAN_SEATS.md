@@ -1,7 +1,7 @@
 # Human-seat history
 
 Overview displays the latest valid ring human-seat count beside bot entries and
-adds a blue human-seat series to the ring history chart. Monitoring shows hourly
+adds a purple human-seat series to the ring history chart. Monitoring shows hourly
 averages, ranges and sample coverage on a separate count scale. Each street's
 hover readout includes the corresponding hourly human count.
 
